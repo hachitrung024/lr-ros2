@@ -1,0 +1,25 @@
+# ROS 2 / colcon outputs
+build/
+install/
+log/
+
+# Local reference repository (not part of this workspace)
+src/zed-ros2-examples/
+local_ref/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# CMake
+CMakeFiles/
+CMakeCache.txt
+compile_commands.json
+
+# Editors and operating systems
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
