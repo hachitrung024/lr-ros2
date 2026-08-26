@@ -1,0 +1,57 @@
+terrain_geometry:
+  ros__parameters:
+    input.point_cloud_topic: /zed/zed_node/point_cloud/cloud_registered
+    frames.map_frame: map
+    tf.lookup_timeout_sec: 0.1
+    diagnostics.period_sec: 1.0
+    diagnostics.stale_after_sec: 2.0
+    output.heatmap_pixels_per_cell: 24
+
+    terrain.enabled: true
+    terrain.radius_m: 12.0
+    terrain.cell_size_m: 1.0
+    terrain.ttl_seconds: 60.0
+    terrain.retention_hysteresis_m: 1.0
+    terrain.pose_jump_threshold_m: 3.0
+    terrain.pose_jump_rotation_deg: 45.0
+
+    terrain.min_distance: 0.35
+    terrain.max_distance: 15.0
+    terrain.min_forward_m: 1.0
+    terrain.max_forward_m: 10.0
+    terrain.min_lateral_m: -3.0
+    terrain.max_lateral_m: 3.0
+    terrain.min_height_m: -10.0
+    terrain.max_height_m: 10.0
+
+    terrain.max_ingest_points_per_frame: 12000
+    terrain.max_points_per_cell_per_frame: 200
+    terrain.max_points_per_cell: 1500
+    terrain.point_window_seconds: 10.0
+    terrain.voxel_size_m: 0.05
+    terrain.fit_every_frames: 5
+    terrain.max_cells_fit_per_cycle: 100
+    terrain.max_central_fit_points: 1200
+    terrain.max_neighbor_fit_points: 300
+    terrain.neighbor_halo_m: 0.10
+    terrain.ransac_iterations: 160
+    terrain.robust_refinement_iterations: 3
+
+    terrain.min_accumulation_frames: 3
+    terrain.min_cell_points: 80
+    terrain.distance_threshold: 0.035
+    terrain.min_cell_inliers: 10
+    terrain.min_cell_inlier_ratio: 0.15
+    terrain.min_cell_principal_stddev: 0.10
+    terrain.max_cell_rmse: 0.035
+    terrain.max_plane_slope_deg: 55.0
+    terrain.auto_scale_cell_thresholds: true
+    terrain.cell_reference_size_m: 1.0
+
+    terrain.confirmation_good_fits: 2
+    terrain.rejection_bad_fits: 2
+    terrain.plane_consistency_normal_deg: 5.0
+    terrain.plane_consistency_height_m: 0.10
+    terrain.plane_ema_alpha: 0.25
+    terrain.random_seed: 7
+    terrain.print_status: false

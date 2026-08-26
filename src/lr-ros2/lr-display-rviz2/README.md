@@ -53,6 +53,14 @@ Set `svo_realtime:=false` to process every frame instead of preserving the
 recorded timing. In that mode, playback speed can be customized through the
 ZED wrapper configuration.
 
+For stereo cameras the launch file also starts `lr_terrain_geometry` by
+default. Use `start_terrain_node:=false` to disable it, or override
+`terrain_params_file` and `map_frame` for a different terrain setup. The
+terrain heatmap is shown as an Image dock inside the main RViz window, in the
+former Depth Map position. The ZED Depth Map remains available but is disabled
+by default. The central 3D Terrain group remains disabled by default and can be
+enabled for GridMap and marker debugging.
+
 ![ZED rendering on Rviz](images/depthcloud-RGB.jpg)
 ![ZED rendering on Rviz](images/ZEDM-Rviz.jpg)
 ![ZED rendering on Rviz](images/ZED-Rviz.jpg)

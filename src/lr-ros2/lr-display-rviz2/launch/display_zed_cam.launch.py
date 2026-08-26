@@ -1,13 +1,13 @@
 # Copyright 2025 Stereolabs
 #
-# Licensed under the Apache License, Version 2.0 (the 'License');
+# Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
 #
 # Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an 'AS IS' BASIS,
+# distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
@@ -41,6 +41,9 @@ def launch_setup(context, *args, **kwargs):
     svo_path = LaunchConfiguration('svo_path')
     svo_realtime = LaunchConfiguration('svo_realtime')
     publish_svo_clock = LaunchConfiguration('publish_svo_clock')
+    start_terrain_node = LaunchConfiguration('start_terrain_node')
+    terrain_params_file = LaunchConfiguration('terrain_params_file')
+    map_frame = LaunchConfiguration('map_frame')
 
     camera_name_val = camera_name.perform(context)
     camera_model_val = camera_model.perform(context)
@@ -97,10 +100,33 @@ def launch_setup(context, *args, **kwargs):
         condition=IfCondition(start_zed_node)
     )
 
-    return [
+    nodes = [
         rviz2_node,
         zed_wrapper_launch
     ]
+
+    if camera_type == 'stereo':
+        terrain_node = Node(
+            package='lr_terrain_geometry',
+            executable='terrain_geometry_node',
+            name='terrain_geometry',
+            output='screen',
+            parameters=[
+                terrain_params_file,
+                {
+                    'input.point_cloud_topic': (
+                        f'/{camera_name_val}/zed_node/'
+                        'point_cloud/cloud_registered'
+                    ),
+                    'frames.map_frame': map_frame,
+                    'use_sim_time': publish_svo_clock,
+                }
+            ],
+            condition=IfCondition(start_terrain_node)
+        )
+        nodes.append(terrain_node)
+
+    return nodes
 
 
 def generate_launch_description():
@@ -146,6 +172,25 @@ def generate_launch_description():
                     'If set to `true` the node will act as a clock server '
                     'publishing the SVO timestamp. This is useful for node '
                     'synchronization')),
+            DeclareLaunchArgument(
+                'start_terrain_node',
+                default_value='true',
+                description=(
+                    'Start the LR terrain geometry estimator for stereo '
+                    'camera models.'),
+                choices=['true', 'false']),
+            DeclareLaunchArgument(
+                'terrain_params_file',
+                default_value=os.path.join(
+                    get_package_share_directory('lr_terrain_geometry'),
+                    'config',
+                    'terrain_geometry.yaml'
+                ),
+                description='Terrain geometry ROS parameter file.'),
+            DeclareLaunchArgument(
+                'map_frame',
+                default_value='map',
+                description='World frame used by terrain geometry.'),
             OpaqueFunction(function=launch_setup)
         ]
     )
