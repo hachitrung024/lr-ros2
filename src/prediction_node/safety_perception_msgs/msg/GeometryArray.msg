@@ -1,0 +1,4 @@
+std_msgs/Header header
+uint64 source_trajectory_id
+builtin_interfaces/Time source_trajectory_stamp
+GeometryStep[] steps

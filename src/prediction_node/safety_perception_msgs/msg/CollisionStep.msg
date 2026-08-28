@@ -1,0 +1,3 @@
+uint32 step_id
+float64 distance_along_route_m
+CollisionObject[] collision_objects

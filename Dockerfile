@@ -20,8 +20,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
        -o /usr/share/keyrings/ros-archive-keyring.gpg \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" \
        > /etc/apt/sources.list.d/ros2.list \
+    && curl -fsSL https://packages.osrfoundation.org/gazebo.gpg \
+       -o /usr/share/keyrings/pkgs-osrf-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/pkgs-osrf-archive-keyring.gpg] https://packages.osrfoundation.org/gazebo/ubuntu-stable $(. /etc/os-release && echo $UBUNTU_CODENAME) main" \
+       > /etc/apt/sources.list.d/gazebo-stable.list \
     && apt-get update \
-    && apt-get install -y --no-install-recommends ros-humble-desktop \
+    && apt-get install -y --no-install-recommends \
+       ros-humble-desktop ros-humble-depth-image-proc \
+       gz-harmonic python3-gz-transport13 \
     && rosdep init 2>/dev/null || true \
     && rosdep update \
     && rm -rf /var/lib/apt/lists/*

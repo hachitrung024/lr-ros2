@@ -2,6 +2,8 @@
 build/
 install/
 log/
+simulation/logs/
+simulation/rosbags/
 
 # Local reference repository (not part of this workspace)
 src/zed-ros2-examples/

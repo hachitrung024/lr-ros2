@@ -1,0 +1,17 @@
+pointcloud_transform_node:
+  ros__parameters:
+    input_topic: /zed/zed_node/point_cloud/cloud_registered
+    output_topic: /lr/point_cloud/cloud_in_map
+    target_frame: map
+    transform_timeout_sec: 0.5
+    pose_source: tf
+    mavlink_position_topic: /lr/mavlink/position_enu
+    mavlink_attitude_topic: /lr/mavlink/attitude_enu
+    mavlink_base_frame: lr_base_link
+    camera_link_frame: zed_camera_link
+    base_to_camera_x_m: 0.0
+    base_to_camera_y_m: 0.0
+    base_to_camera_z_m: 0.0
+    base_to_camera_roll_deg: 0.0
+    base_to_camera_pitch_deg: 0.0
+    base_to_camera_yaw_deg: 0.0

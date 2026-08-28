@@ -1,0 +1,10 @@
+uint32 step_id
+float64 predicted_roll_deg
+float64 predicted_pitch_deg
+float64 static_stability_margin_m
+float64 normalized_static_stability_margin
+StabilityMomentEvidence stability_moment
+ZmpEvidence zmp
+string terrain_id
+float32 confidence
+bool confidence_valid

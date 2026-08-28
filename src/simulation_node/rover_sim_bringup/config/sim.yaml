@@ -1,0 +1,5 @@
+cmd_vel_bridge:
+  ros__parameters:
+    tau_s: 0.25
+    max_linear_accel: 0.8
+    max_angular_accel: 1.5

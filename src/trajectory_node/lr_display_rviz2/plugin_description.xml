@@ -1,0 +1,10 @@
+<library path="svo_playback_panel">
+  <class
+    name="lr_display_rviz2/SvoPlaybackPanel"
+    type="lr_display_rviz2::SvoPlaybackPanel"
+    base_class_type="rviz_common::Panel">
+    <description>
+      Controls ZED SVO playback with play/pause, frame stepping, and seeking.
+    </description>
+  </class>
+</library>

@@ -1,0 +1,15 @@
+prediction_node:
+  ros__parameters:
+    trajectory_topic: /trajectory
+    tracked_objects_topic: /tracked_objects
+    geometry_topic: /geometry
+    state_topic: /rover/state
+    external_wrench_topic: /external_wrenches
+    prediction_output_topic: /predict_output
+    expected_frame_id: map
+    # static | dynamic — maps to PredictionProfile
+    prediction_profile: static
+    require_full_geometry_coverage: false
+    max_object_age_sec: -1.0
+    max_geometry_age_sec: -1.0
+    max_state_age_sec: -1.0
