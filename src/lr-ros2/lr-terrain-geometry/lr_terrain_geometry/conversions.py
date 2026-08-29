@@ -13,8 +13,14 @@ from sensor_msgs.msg import Image, PointCloud2
 from sensor_msgs_py import point_cloud2
 from std_msgs.msg import ColorRGBA, Float32MultiArray, MultiArrayDimension
 from visualization_msgs.msg import Marker, MarkerArray
+from vision_msgs.msg import (
+    Detection3D,
+    Detection3DArray,
+    ObjectHypothesisWithPose,
+)
 
 from .estimator import TerrainGeometryConfig, TerrainResult
+from .object_filter import ObjectBox3D
 
 
 GRID_MAP_LAYERS = (
@@ -45,6 +51,65 @@ def point_cloud_to_xyz(message: PointCloud2) -> np.ndarray:
     if values.size == 0:
         return np.empty((0, 3), dtype=np.float64)
     return values.reshape(-1, 3)
+
+
+def instance_mask_image_to_labels(message: Image) -> np.ndarray:
+    """Decode a mono16 instance-label image while respecting row padding."""
+    if message.encoding.lower() not in {"mono16", "16uc1"}:
+        raise ValueError(
+            "instance mask encoding must be mono16 or 16UC1"
+        )
+    height = int(message.height)
+    width = int(message.width)
+    if height <= 0 or width <= 0:
+        raise ValueError("instance mask dimensions must be positive")
+    packed_width = width * np.dtype(np.uint16).itemsize
+    if int(message.step) < packed_width:
+        raise ValueError("instance mask step is smaller than its packed row")
+    required = int(message.step) * height
+    if len(message.data) < required:
+        raise ValueError("instance mask data is shorter than step * height")
+
+    rows = np.frombuffer(
+        message.data,
+        dtype=np.uint8,
+        count=required,
+    ).reshape(height, int(message.step))
+    packed = np.ascontiguousarray(rows[:, :packed_width])
+    byte_order = ">u2" if bool(message.is_bigendian) else "<u2"
+    return packed.view(byte_order).reshape(height, width).astype(
+        np.uint16,
+        copy=False,
+    )
+
+
+def object_boxes_to_detection_array(
+    boxes: Iterable[ObjectBox3D],
+    header,
+) -> Detection3DArray:
+    """Serialize cloud-frame object boxes for debugging and consumers."""
+    output = Detection3DArray()
+    output.header = header
+    for box in boxes:
+        message = Detection3D()
+        message.header = header
+        message.id = box.detection_id
+        hypothesis = ObjectHypothesisWithPose()
+        hypothesis.hypothesis.class_id = box.class_id
+        hypothesis.hypothesis.score = float(box.confidence)
+        message.results = [hypothesis]
+        center = box.center
+        size = box.size
+        message.bbox.center.position.x = float(center[0])
+        message.bbox.center.position.y = float(center[1])
+        message.bbox.center.position.z = float(center[2])
+        message.bbox.center.orientation.z = math.sin(0.5 * box.yaw)
+        message.bbox.center.orientation.w = math.cos(0.5 * box.yaw)
+        message.bbox.size.x = float(size[0])
+        message.bbox.size.y = float(size[1])
+        message.bbox.size.z = float(size[2])
+        output.detections.append(message)
+    return output
 
 
 def transform_to_matrix(transform) -> np.ndarray:
@@ -291,6 +356,81 @@ def _point(values) -> Point:
     point = Point()
     point.x, point.y, point.z = (float(value) for value in values)
     return point
+
+
+def _object_color(class_id: str) -> tuple[float, float, float]:
+    palette = (
+        (0.10, 0.90, 1.00),
+        (1.00, 0.45, 0.10),
+        (0.35, 1.00, 0.25),
+        (1.00, 0.20, 0.75),
+        (0.75, 0.35, 1.00),
+        (1.00, 0.90, 0.10),
+    )
+    color_index = sum(
+        (index + 1) * ord(character)
+        for index, character in enumerate(class_id)
+    ) % len(palette)
+    return palette[color_index]
+
+
+def object_boxes_to_markers(
+    boxes: Iterable[ObjectBox3D],
+    header,
+) -> MarkerArray:
+    """Create RViz wireframe boxes and class-confidence labels."""
+    delete_all = Marker()
+    delete_all.header = header
+    delete_all.action = Marker.DELETEALL
+    markers = [delete_all]
+
+    edges = (
+        (0, 1), (1, 2), (2, 3), (3, 0),
+        (4, 5), (5, 6), (6, 7), (7, 4),
+        (0, 4), (1, 5), (2, 6), (3, 7),
+    )
+    for marker_id, box in enumerate(boxes):
+        corners = box.corners
+        color = _object_color(box.class_id)
+
+        outline = Marker()
+        outline.header = header
+        outline.ns = "object_boxes"
+        outline.id = marker_id
+        outline.type = Marker.LINE_LIST
+        outline.action = Marker.ADD
+        outline.pose.orientation.w = 1.0
+        outline.scale.x = 0.04
+        outline.color.r, outline.color.g, outline.color.b = color
+        outline.color.a = 1.0
+        outline.lifetime.sec = 1
+        for first, second in edges:
+            outline.points.extend((
+                _point(corners[first]),
+                _point(corners[second]),
+            ))
+        markers.append(outline)
+
+        label = Marker()
+        label.header = header
+        label.ns = "object_labels"
+        label.id = marker_id
+        label.type = Marker.TEXT_VIEW_FACING
+        label.action = Marker.ADD
+        label.pose.position = _point([
+            box.center[0],
+            box.center[1],
+            np.max(corners[:, 2]) + 0.15,
+        ])
+        label.pose.orientation.w = 1.0
+        label.scale.z = 0.18
+        label.color.r = label.color.g = label.color.b = 1.0
+        label.color.a = 1.0
+        label.lifetime.sec = 1
+        label.text = f"{box.class_id} {box.confidence:.0%}"
+        markers.append(label)
+
+    return MarkerArray(markers=markers)
 
 
 def _line_marker(header, namespace: str, marker_id: int, width: float) -> Marker:

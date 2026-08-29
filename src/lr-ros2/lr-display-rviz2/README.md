@@ -61,6 +61,30 @@ former Depth Map position. The ZED Depth Map remains available but is disabled
 by default. The central 3D Terrain group remains disabled by default and can be
 enabled for GridMap and marker debugging.
 
+Instance segmentation starts automatically when an external checkpoint path
+is provided:
+
+```bash
+$ ros2 launch lr_display_rviz2 display_zed_cam.launch.py \
+    camera_model:=zed2i \
+    svo_path:=/path/to/recording.svo2 \
+    segmentation_model_path:=/path/to/best.pt
+```
+
+The `start_segmentation_node` argument defaults to `auto`; use
+`start_segmentation_node:=false` to explicitly disable segmentation.
+
+The existing RGB dock then shows the segmentation mask/contour/class overlay.
+When no model path is provided, segmentation is disabled and the same dock is remapped to the
+original ZED RGB image so the existing launch behavior remains useful. The
+original RGB topic is also retained as the disabled `ZED RGB` display.
+Segmentation remains image-only. When it is enabled, the combined launch also
+enables detection-aware filtering in terrain: point clouds are synchronized to
+`/segmentation/detections_2d`, object boxes are published on
+`/terrain_geometry/object_boxes_3d`, and points in those boxes are removed
+before terrain fitting. The Terrain group draws matching wireframes and
+class-confidence labels from `/terrain_geometry/object_box_markers`.
+
 ![ZED rendering on Rviz](images/depthcloud-RGB.jpg)
 ![ZED rendering on Rviz](images/ZEDM-Rviz.jpg)
 ![ZED rendering on Rviz](images/ZED-Rviz.jpg)

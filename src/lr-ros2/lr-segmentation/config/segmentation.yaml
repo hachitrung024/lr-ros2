@@ -1,0 +1,19 @@
+segmentation:
+  ros__parameters:
+    input.image_topic: /zed/zed_node/rgb/color/rect/image
+    model.path: ""
+    model.device: "0"
+    model.confidence: 0.25
+    model.image_size: 960
+    model.iou: 0.60
+    model.classes: []
+    model.quantize: false
+
+    diagnostics.period_sec: 1.0
+    diagnostics.stale_after_sec: 2.0
+
+    merge.enabled: true
+    merge.excluded_classes: [person]
+    merge.mask_dilation_px: 20
+    merge.minimum_mask_iou: 0.02
+    merge.maximum_mask_gap_px: 35.0

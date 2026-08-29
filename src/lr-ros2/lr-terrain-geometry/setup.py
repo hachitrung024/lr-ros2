@@ -23,7 +23,7 @@ setup(
     maintainer_email="maintainers@example.com",
     description="Rolling terrain plane estimation for ZED point clouds",
     license="Apache-2.0",
-    tests_require=["pytest"],
+    extras_require={"test": ["pytest"]},
     entry_points={
         "console_scripts": [
             "terrain_geometry_node = lr_terrain_geometry.node:main",

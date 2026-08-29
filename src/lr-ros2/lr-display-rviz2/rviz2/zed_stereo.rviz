@@ -108,12 +108,26 @@ Visualization Manager:
           Name: RGB
           Normalize Range: true
           Topic:
+            Depth: 1
+            Durability Policy: Volatile
+            History Policy: Keep Last
+            Reliability Policy: Best Effort
+            Value: /segmentation/overlay
+          Value: true
+        - Class: rviz_default_plugins/Image
+          Enabled: false
+          Max Value: 1
+          Median window: 5
+          Min Value: 0
+          Name: ZED RGB
+          Normalize Range: true
+          Topic:
             Depth: 5
             Durability Policy: Volatile
             History Policy: Keep Last
             Reliability Policy: Reliable
             Value: /zed/zed_node/rgb/color/rect/image
-          Value: true
+          Value: false
         - Class: rviz_default_plugins/Image
           Enabled: false
           Max Value: 1
@@ -463,7 +477,21 @@ Visualization Manager:
             Reliability Policy: Reliable
             Value: /terrain_geometry/markers
           Value: true
-      Enabled: false
+        - Class: rviz_default_plugins/MarkerArray
+          Enabled: true
+          Name: Detected Object Boxes
+          Namespaces:
+            object_boxes: true
+            object_labels: true
+          Topic:
+            Depth: 1
+            Durability Policy: Volatile
+            Filter size: 10
+            History Policy: Keep Last
+            Reliability Policy: Best Effort
+            Value: /terrain_geometry/object_box_markers
+          Value: true
+      Enabled: true
       Name: Terrain
     - Class: rviz_common/Group
       Displays:

@@ -21,7 +21,8 @@ from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
     OpaqueFunction,
-    IncludeLaunchDescription
+    IncludeLaunchDescription,
+    LogInfo
 )
 from launch.conditions import IfCondition
 from launch.substitutions import (
@@ -44,9 +45,28 @@ def launch_setup(context, *args, **kwargs):
     start_terrain_node = LaunchConfiguration('start_terrain_node')
     terrain_params_file = LaunchConfiguration('terrain_params_file')
     map_frame = LaunchConfiguration('map_frame')
+    start_segmentation_node = LaunchConfiguration('start_segmentation_node')
+    segmentation_params_file = LaunchConfiguration('segmentation_params_file')
+    segmentation_model_path = LaunchConfiguration('segmentation_model_path')
 
     camera_name_val = camera_name.perform(context)
     camera_model_val = camera_model.perform(context)
+    start_segmentation_val = start_segmentation_node.perform(context).lower()
+    segmentation_model_path_val = segmentation_model_path.perform(context).strip()
+
+    # A model path is the complete signal that segmentation was requested.
+    # Keep the explicit flag for compatibility, but let a non-empty path
+    # enable the node so callers do not need to repeat start_segmentation_node.
+    segmentation_warning = None
+    if segmentation_model_path_val and start_segmentation_val != 'false':
+        start_segmentation_val = 'true'
+    elif not segmentation_model_path_val:
+        if start_segmentation_val == 'true':
+            segmentation_warning = LogInfo(msg=TextSubstitution(
+                text=(
+                    'No segmentation_model_path was provided; '
+                    'disabling start_segmentation_node.')))
+        start_segmentation_val = 'false'
 
     if (camera_name_val == ''):
         camera_name_val = 'zed'
@@ -71,6 +91,13 @@ def launch_setup(context, *args, **kwargs):
     )
 
     # RVIZ2 node
+    rviz_remappings = []
+    if camera_type == 'stereo' and start_segmentation_val != 'true':
+        rviz_remappings.append((
+            '/segmentation/overlay',
+            f'/{camera_name_val}/zed_node/rgb/color/rect/image'
+        ))
+
     rviz2_node = Node(
         package='rviz2',
         namespace=camera_name_val,
@@ -78,7 +105,8 @@ def launch_setup(context, *args, **kwargs):
         name=camera_model_val + '_rviz2',
         output='screen',
         arguments=[['-d'], [config_rviz2]],
-        parameters=[{'use_sim_time': publish_svo_clock}]
+        parameters=[{'use_sim_time': publish_svo_clock}],
+        remappings=rviz_remappings
     )
 
     # ZED Wrapper launch file
@@ -105,6 +133,9 @@ def launch_setup(context, *args, **kwargs):
         zed_wrapper_launch
     ]
 
+    if segmentation_warning is not None:
+        nodes.insert(0, segmentation_warning)
+
     if camera_type == 'stereo':
         terrain_node = Node(
             package='lr_terrain_geometry',
@@ -120,11 +151,44 @@ def launch_setup(context, *args, **kwargs):
                     ),
                     'frames.map_frame': map_frame,
                     'use_sim_time': publish_svo_clock,
+                    'object_filter.enabled': (
+                        start_segmentation_val == 'true'
+                    ),
+                    'object_filter.detections_topic': (
+                        '/segmentation/detections_2d'
+                    ),
+                    'object_filter.instance_masks_topic': (
+                        '/segmentation/instance_masks'
+                    ),
+                    'object_filter.camera_info_topic': (
+                        f'/{camera_name_val}/zed_node/'
+                        'rgb/color/rect/camera_info'
+                    ),
                 }
             ],
             condition=IfCondition(start_terrain_node)
         )
         nodes.append(terrain_node)
+
+        segmentation_node = Node(
+            package='lr_segmentation',
+            executable='segmentation_node',
+            name='segmentation',
+            output='screen',
+            parameters=[
+                segmentation_params_file,
+                {
+                    'input.image_topic': (
+                        f'/{camera_name_val}/zed_node/'
+                        'rgb/color/rect/image'
+                    ),
+                    'model.path': segmentation_model_path,
+                    'use_sim_time': publish_svo_clock,
+                }
+            ],
+            condition=IfCondition(TextSubstitution(text=start_segmentation_val))
+        )
+        nodes.append(segmentation_node)
 
     return nodes
 
@@ -191,6 +255,26 @@ def generate_launch_description():
                 'map_frame',
                 default_value='map',
                 description='World frame used by terrain geometry.'),
+            DeclareLaunchArgument(
+                'start_segmentation_node',
+                default_value='auto',
+                description=(
+                    'Start segmentation, disable explicitly with false; '
+                    'auto enables it when segmentation_model_path is provided.'),
+                choices=['auto', 'true', 'false']),
+            DeclareLaunchArgument(
+                'segmentation_params_file',
+                default_value=os.path.join(
+                    get_package_share_directory('lr_segmentation'),
+                    'config',
+                    'segmentation.yaml'
+                ),
+                description='Segmentation ROS parameter file.'),
+            DeclareLaunchArgument(
+                'segmentation_model_path',
+                default_value='',
+                description=(
+                    'External Ultralytics instance-segmentation checkpoint.')),
             OpaqueFunction(function=launch_setup)
         ]
     )

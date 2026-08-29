@@ -7,6 +7,26 @@ terrain_geometry:
     diagnostics.stale_after_sec: 2.0
     output.heatmap_pixels_per_cell: 24
 
+    # Enabled by the combined launch when segmentation is running. Point
+    # clouds are paired to Detection2DArray messages by their source stamp.
+    object_filter.enabled: false
+    object_filter.detections_topic: /segmentation/detections_2d
+    object_filter.instance_masks_topic: /segmentation/instance_masks
+    object_filter.camera_info_topic: /zed/zed_node/rgb/color/rect/camera_info
+    object_filter.sync_tolerance_sec: 0.05
+    object_filter.sync_cache_sec: 3.0
+    object_filter.sync_queue_size: 50
+    object_filter.minimum_confidence: 0.25
+    object_filter.classes: []
+    object_filter.minimum_cluster_points: 20
+    object_filter.depth_bin_size_m: 0.15
+    object_filter.depth_tolerance_m: 0.20
+    object_filter.relative_depth_tolerance: 0.03
+    object_filter.box_padding_m: 0.05
+    object_filter.lower_percentile: 2.0
+    object_filter.upper_percentile: 98.0
+    object_filter.minimum_orientation_ratio: 1.15
+
     terrain.enabled: true
     terrain.radius_m: 12.0
     terrain.cell_size_m: 1.0
