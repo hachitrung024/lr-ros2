@@ -151,19 +151,7 @@ def launch_setup(context, *args, **kwargs):
                     ),
                     'frames.map_frame': map_frame,
                     'use_sim_time': publish_svo_clock,
-                    'object_filter.enabled': (
-                        start_segmentation_val == 'true'
-                    ),
-                    'object_filter.detections_topic': (
-                        '/segmentation/detections_2d'
-                    ),
-                    'object_filter.instance_masks_topic': (
-                        '/segmentation/instance_masks'
-                    ),
-                    'object_filter.camera_info_topic': (
-                        f'/{camera_name_val}/zed_node/'
-                        'rgb/color/rect/camera_info'
-                    ),
+                    'object_filter.enabled': False,
                 }
             ],
             condition=IfCondition(start_terrain_node)

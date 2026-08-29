@@ -27,7 +27,7 @@ The segmentation model must be an instance-segmentation YOLO model and must
 exist on the filesystem, for example:
 
 ```text
-/workspace/testros2/landfill-rover/segmentation/best.pt
+/workspace/testros2/models/best.pt
 ```
 
 ## 2. Run the full SVO pipeline: ZED + segmentation + terrain + RViz
@@ -39,7 +39,7 @@ ros2 launch lr_display_rviz2 display_zed_cam.launch.py \
   camera_model:=zed2i \
   svo_path:=/workspace/svo/zed_20260608_105844_0001.svo2 \
   publish_svo_clock:=true \
-  segmentation_model_path:=/workspace/testros2/landfill-rover/segmentation/best.pt
+  segmentation_model_path:=/workspace/testros2/models/best.pt
 ```
 
 When `segmentation_model_path` is set, segmentation is enabled automatically.
@@ -48,15 +48,13 @@ Therefore, you do not need to add `start_segmentation_node:=true`.
 The pipeline will:
 
 1. Read the image and point cloud from the ZED camera.
-2. Run instance segmentation.
-3. Project the point cloud into the 2D masks.
-4. Create an object-oriented 3D bounding box.
-5. Remove points inside the box before terrain fitting.
-6. Display the 3D box and terrain markers in RViz.
+2. Run instance segmentation and publish an RGB overlay.
+3. Process terrain independently from the point cloud.
+4. Display the overlay and terrain results in RViz.
 
 ## 3. Run an SVO without segmentation
 
-Terrain processing will still run, but objects will not be filtered:
+Terrain processing will still run independently:
 
 ```bash
 ros2 launch lr_display_rviz2 display_zed_cam.launch.py \
@@ -78,7 +76,7 @@ Use `svo_path:=live` or omit the `svo_path` argument:
 ros2 launch lr_display_rviz2 display_zed_cam.launch.py \
   camera_model:=zed2i \
   svo_path:=live \
-  segmentation_model_path:=/workspace/testros2/landfill-rover/segmentation/best.pt
+  segmentation_model_path:=/workspace/testros2/models/best.pt
 ```
 
 To run without segmentation:
@@ -108,20 +106,17 @@ Terminal 2 — segmentation:
 ```bash
 ros2 launch lr_segmentation segmentation.launch.py \
   camera_name:=zed \
-  model_path:=/workspace/testros2/landfill-rover/segmentation/best.pt \
+  model_path:=/workspace/testros2/models/best.pt \
   use_sim_time:=true
 ```
 
-Terminal 3 — terrain with object filtering:
+Terminal 3 — terrain:
 
 ```bash
 ros2 launch lr_terrain_geometry terrain_geometry.launch.py \
   camera_name:=zed \
-  object_filter_enabled:=true \
   use_sim_time:=true
 ```
-
-If you only want terrain processing, set `object_filter_enabled:=false`.
 
 ## 6. Common launch arguments
 
@@ -142,8 +137,6 @@ Segmentation:
 
 ```text
 /segmentation/overlay
-/segmentation/detections_2d
-/segmentation/instance_masks
 ```
 
 Terrain:
@@ -152,12 +145,7 @@ Terrain:
 /terrain_geometry/grid_map
 /terrain_geometry/markers
 /terrain_geometry/heatmap
-/terrain_geometry/object_boxes_3d
-/terrain_geometry/object_box_markers
 ```
-
-In RViz, the `Detected Object Boxes` display is inside the `Terrain` group and
-uses the `/terrain_geometry/object_box_markers` topic.
 
 ## 8. Quick troubleshooting
 
@@ -167,16 +155,10 @@ Check the active topics:
 ros2 topic list | grep -E 'segmentation|terrain_geometry|point_cloud'
 ```
 
-Check diagnostics:
-
-```bash
-ros2 topic echo /diagnostics --once
-```
-
 If the model does not run, verify the path:
 
 ```bash
-test -f /workspace/testros2/landfill-rover/segmentation/best.pt && echo OK
+test -f /workspace/testros2/models/best.pt && echo OK
 ```
 
 When playing an SVO, use `publish_svo_clock:=true` so that all nodes use the
