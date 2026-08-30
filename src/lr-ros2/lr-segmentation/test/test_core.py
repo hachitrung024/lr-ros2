@@ -37,6 +37,24 @@ def test_model_returns_rendered_overlay(tmp_path, monkeypatch):
     calls = {}
 
     class FakeResult:
+        masks = SimpleNamespace(data=np.asarray([
+            [
+                [0, 0, 0, 0, 0, 0],
+                [0, 1, 1, 1, 0, 0],
+                [0, 1, 1, 1, 0, 0],
+                [0, 1, 1, 1, 0, 0],
+                [0, 0, 0, 0, 0, 0],
+            ],
+            [
+                [0, 0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0, 0],
+                [0, 0, 1, 1, 1, 0],
+                [0, 0, 1, 1, 1, 0],
+                [0, 0, 1, 1, 1, 0],
+            ],
+        ], dtype=np.float32))
+        boxes = SimpleNamespace(conf=np.asarray([0.9, 0.8]))
+
         def plot(self):
             return np.full((10, 12, 3), 17, dtype=np.uint8)
 
@@ -66,3 +84,7 @@ def test_model_returns_rendered_overlay(tmp_path, monkeypatch):
     assert calls["model_path"] == str(checkpoint.resolve())
     assert calls["predict"]["source"] is source
     assert prediction.overlay_bgr.shape == source.shape
+    assert prediction.instance_labels.shape == source.shape[:2]
+    assert prediction.instance_labels.dtype == np.uint16
+    assert set(np.unique(prediction.instance_labels)) == {0, 1, 2}
+    assert prediction.instance_labels[5, 5] == 1

@@ -3,7 +3,7 @@
 <package format="3">
   <name>lr_segmentation</name>
   <version>0.1.0</version>
-  <description>RGB segmentation overlay for ROS 2.</description>
+  <description>RGB segmentation overlay and depth-projected 3D masks.</description>
   <maintainer email="maintainers@example.com">Landfill Rover</maintainer>
   <license>Apache-2.0</license>
 

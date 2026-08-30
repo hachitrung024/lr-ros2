@@ -6,3 +6,15 @@ segmentation:
     model.confidence: 0.25
     model.image_size: 960
     model.iou: 0.60
+
+mask_projector_3d:
+  ros__parameters:
+    input.mask_topic: /segmentation/instance_mask
+    input.depth_topic: /zed/zed_node/depth/depth_registered
+    input.camera_info_topic: /zed/zed_node/rgb/color/rect/camera_info
+    output.cloud_topic: /segmentation/mask_cloud
+    sync_tolerance_sec: 0.05
+    minimum_depth_m: 0.2
+    maximum_depth_m: 20.0
+    sampling_stride: 1
+    maximum_points: 200000

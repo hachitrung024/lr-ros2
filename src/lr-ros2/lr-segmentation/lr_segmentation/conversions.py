@@ -1,4 +1,4 @@
-"""Conversions between ROS color images and NumPy arrays."""
+"""Conversions between ROS images and NumPy arrays."""
 
 from __future__ import annotations
 
@@ -60,4 +60,21 @@ def bgr_to_image_message(image_bgr: np.ndarray, header: Header) -> Image:
     message.is_bigendian = 0
     message.step = rgb.shape[1] * 3
     message.data = array("B", rgb.tobytes())
+    return message
+
+
+def labels_to_image_message(labels: np.ndarray, header: Header) -> Image:
+    """Encode source-resolution instance IDs as a mono16 ROS image."""
+    values = np.asarray(labels)
+    if values.ndim != 2 or values.dtype != np.uint16:
+        raise ValueError("labels must be uint16 with shape (H, W)")
+
+    packed = np.ascontiguousarray(values.astype("<u2", copy=False))
+    message = Image()
+    message.header = header
+    message.height, message.width = packed.shape
+    message.encoding = "mono16"
+    message.is_bigendian = 0
+    message.step = message.width * 2
+    message.data = array("B", packed.tobytes())
     return message

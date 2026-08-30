@@ -43,7 +43,9 @@ class FakeSegmentationModel:
     def predict(self, image_bgr):
         overlay = image_bgr.copy()
         overlay[1:7, 2:8] = [10, 20, 30]
-        return SegmentationPrediction(overlay)
+        labels = np.zeros(image_bgr.shape[:2], dtype=np.uint16)
+        labels[1:7, 2:8] = 4
+        return SegmentationPrediction(overlay, labels)
 
 
 @pytest.fixture
@@ -74,10 +76,17 @@ def test_node_publishes_rgb_overlay(ros_context):
     image_qos.reliability = ReliabilityPolicy.BEST_EFFORT
     image_publisher = driver.create_publisher(Image, "/test/image", image_qos)
     overlays = []
+    masks = []
     driver.create_subscription(
         Image,
         "/segmentation/overlay",
         overlays.append,
+        image_qos,
+    )
+    driver.create_subscription(
+        Image,
+        "/segmentation/instance_mask",
+        masks.append,
         image_qos,
     )
 
@@ -98,16 +107,23 @@ def test_node_publishes_rgb_overlay(ros_context):
             if name.startswith("/segmentation/")
         }
         assert segmentation_outputs == {
+            "/segmentation/instance_mask": ["sensor_msgs/msg/Image"],
             "/segmentation/overlay": ["sensor_msgs/msg/Image"],
         }
 
         image_publisher.publish(make_color_image(value=5))
-        assert spin_until(executor, lambda: bool(overlays))
+        assert spin_until(executor, lambda: bool(overlays) and bool(masks))
 
         overlay = overlays[-1]
         assert overlay.encoding == "rgb8"
         pixels = np.frombuffer(overlay.data, dtype=np.uint8).reshape(8, 10, 3)
         assert pixels[2, 3].tolist() == [30, 20, 10]
+
+        mask = masks[-1]
+        assert mask.encoding == "mono16"
+        labels = np.frombuffer(mask.data, dtype="<u2").reshape(8, 10)
+        assert labels[2, 3] == 4
+        assert labels[0, 0] == 0
 
     finally:
         executor.remove_node(node)

@@ -8,7 +8,11 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import Image
 
-from .conversions import bgr_to_image_message, image_message_to_bgr
+from .conversions import (
+    bgr_to_image_message,
+    image_message_to_bgr,
+    labels_to_image_message,
+)
 from .model import create_segmentation_model
 
 
@@ -51,13 +55,20 @@ class SegmentationNode(Node):
             "~/overlay",
             image_qos,
         )
+        self._mask_publisher = self.create_publisher(
+            Image,
+            "~/instance_mask",
+            image_qos,
+        )
         self._image_subscription = self.create_subscription(
             Image,
             str(image_topic),
             self._on_image,
             image_qos,
         )
-        self.get_logger().info(f"RGB={image_topic}; overlay=~/overlay")
+        self.get_logger().info(
+            f"RGB={image_topic}; overlay=~/overlay; mask=~/instance_mask"
+        )
 
     def _on_image(self, message: Image) -> None:
         try:
@@ -67,11 +78,16 @@ class SegmentationNode(Node):
                 prediction.overlay_bgr,
                 message.header,
             )
+            mask = labels_to_image_message(
+                prediction.instance_labels,
+                message.header,
+            )
         except Exception as error:  # Keep processing later camera frames.
             self.get_logger().error(f"Segmentation failed: {error}")
             return
 
         self._overlay_publisher.publish(overlay)
+        self._mask_publisher.publish(mask)
 
 
 def main(args=None) -> None:
