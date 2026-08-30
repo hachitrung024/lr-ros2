@@ -2,6 +2,7 @@ terrain_geometry:
   ros__parameters:
     input.point_cloud_topic: /zed/zed_node/point_cloud/cloud_registered
     frames.map_frame: map
+    frames.sensor_frame: zed_camera_link
     tf.lookup_timeout_sec: 0.1
     diagnostics.period_sec: 1.0
     diagnostics.stale_after_sec: 2.0

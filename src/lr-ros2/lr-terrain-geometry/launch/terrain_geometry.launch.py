@@ -44,6 +44,7 @@ def launch_setup(context, *args, **kwargs):
                 {
                     "input.point_cloud_topic": point_cloud_topic,
                     "frames.map_frame": LaunchConfiguration("map_frame"),
+                    "frames.sensor_frame": LaunchConfiguration("sensor_frame"),
                     "use_sim_time": LaunchConfiguration("use_sim_time"),
                     "object_filter.enabled": object_filter_enabled,
                     "object_filter.detections_topic": detections_topic,
@@ -74,6 +75,7 @@ def generate_launch_description():
             DeclareLaunchArgument("instance_masks_topic", default_value=""),
             DeclareLaunchArgument("camera_info_topic", default_value=""),
             DeclareLaunchArgument("map_frame", default_value="map"),
+            DeclareLaunchArgument("sensor_frame", default_value="zed_camera_link"),
             DeclareLaunchArgument("use_sim_time", default_value="false"),
             DeclareLaunchArgument(
                 "terrain_params_file",

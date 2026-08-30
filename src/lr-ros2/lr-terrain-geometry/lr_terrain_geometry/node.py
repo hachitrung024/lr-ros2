@@ -70,6 +70,11 @@ class TerrainGeometryNode(Node):
             "map",
             read_only,
         ).value
+        self._sensor_frame = self.declare_parameter(
+            "frames.sensor_frame",
+            "zed_camera_link",
+            read_only,
+        ).value
         self._tf_timeout_sec = float(self.declare_parameter(
             "tf.lookup_timeout_sec",
             0.1,
@@ -604,13 +609,30 @@ class TerrainGeometryNode(Node):
     ) -> None:
 
         try:
-            transform = self._tf_buffer.lookup_transform(
-                self._map_frame,
-                message.header.frame_id,
-                Time.from_msg(message.header.stamp),
-                timeout=Duration(seconds=self._tf_timeout_sec),
-            )
-            sensor_to_map = transform_to_matrix(transform.transform)
+            if message.header.frame_id == self._map_frame:
+                # Pre-transformed map clouds (e.g. /lr/point_cloud/cloud_in_map)
+                # carry absolute map coordinates; recover sensor-frame points and
+                # the matching map pose from TF for the estimator.
+                transform = self._tf_buffer.lookup_transform(
+                    self._map_frame,
+                    self._sensor_frame,
+                    Time.from_msg(message.header.stamp),
+                    timeout=Duration(seconds=self._tf_timeout_sec),
+                )
+                sensor_to_map = transform_to_matrix(transform.transform)
+                points_map = point_cloud_to_xyz(message)
+                rotation = sensor_to_map[:3, :3]
+                translation = sensor_to_map[:3, 3]
+                points = (points_map - translation) @ rotation
+            else:
+                transform = self._tf_buffer.lookup_transform(
+                    self._map_frame,
+                    message.header.frame_id,
+                    Time.from_msg(message.header.stamp),
+                    timeout=Duration(seconds=self._tf_timeout_sec),
+                )
+                sensor_to_map = transform_to_matrix(transform.transform)
+                points = point_cloud_to_xyz(message)
         except (TransformException, ValueError) as error:
             self._tf_failure_count += 1
             self._last_error = f"TF unavailable: {error}"
@@ -627,13 +649,6 @@ class TerrainGeometryNode(Node):
                     self._last_rover_position,
                 )
             self._warn_throttled(self._last_error)
-            self._finish_timing(callback_started)
-            return
-
-        try:
-            points = point_cloud_to_xyz(message)
-        except (TypeError, ValueError) as error:
-            self._record_malformed(str(error))
             self._finish_timing(callback_started)
             return
 

@@ -30,6 +30,10 @@ GRID_MAP_LAYERS = (
     "inlier_ratio",
     "state",
     "color",
+    # Machine-readable plane normals (world/map frame) for Prediction geometry.
+    "normal_x",
+    "normal_y",
+    "normal_z",
 )
 
 
@@ -247,6 +251,10 @@ def terrain_result_to_grid_map(
         layers["slope_deg"][location] = float(plane["slope_deg"])
         layers["rmse_m"][location] = float(plane["rmse"])
         layers["inlier_ratio"][location] = float(plane["inlier_ratio"])
+        normal = np.asarray(plane["normal_world"], dtype=np.float64).reshape(3)
+        layers["normal_x"][location] = float(normal[0])
+        layers["normal_y"][location] = float(normal[1])
+        layers["normal_z"][location] = float(normal[2])
 
     # Accepted state deliberately wins over a failed candidate refit. The
     # cached plane remains authoritative until rejection_bad_fits is reached.
@@ -264,6 +272,10 @@ def terrain_result_to_grid_map(
         layers["color"][location] = pack_rgb_float(
             slope_to_rgb(slope, config.max_plane_slope_deg)
         )
+        normal = np.asarray(plane["normal_world"], dtype=np.float64).reshape(3)
+        layers["normal_x"][location] = float(normal[0])
+        layers["normal_y"][location] = float(normal[1])
+        layers["normal_z"][location] = float(normal[2])
 
     message = GridMap()
     message.header.stamp = stamp
