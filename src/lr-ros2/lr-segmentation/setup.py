@@ -22,7 +22,7 @@ setup(
     zip_safe=True,
     maintainer="Landfill Rover",
     maintainer_email="maintainers@example.com",
-    description="RGB segmentation overlay and depth-based 3D boxes for ROS 2",
+    description="RGB segmentation overlay for ROS 2",
     license="Apache-2.0",
     extras_require={"test": ["pytest"]},
     entry_points={

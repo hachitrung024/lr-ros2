@@ -15,24 +15,6 @@ def launch_setup(context, *args, **kwargs):
     point_cloud_topic = LaunchConfiguration("point_cloud_topic").perform(context)
     if not point_cloud_topic:
         point_cloud_topic = f"/{camera_name}/zed_node/point_cloud/cloud_registered"
-    detections_topic = LaunchConfiguration("detections_topic").perform(context)
-    if not detections_topic:
-        detections_topic = "/segmentation/detections_2d"
-    instance_masks_topic = LaunchConfiguration("instance_masks_topic").perform(
-        context
-    )
-    if not instance_masks_topic:
-        instance_masks_topic = "/segmentation/instance_masks"
-    camera_info_topic = LaunchConfiguration("camera_info_topic").perform(context)
-    if not camera_info_topic:
-        camera_info_topic = (
-            f"/{camera_name}/zed_node/rgb/color/rect/camera_info"
-        )
-    object_filter_enabled = (
-        LaunchConfiguration("object_filter_enabled")
-        .perform(context)
-        .lower() == "true"
-    )
     return [
         Node(
             package="lr_terrain_geometry",
@@ -45,10 +27,6 @@ def launch_setup(context, *args, **kwargs):
                     "input.point_cloud_topic": point_cloud_topic,
                     "frames.map_frame": LaunchConfiguration("map_frame"),
                     "use_sim_time": LaunchConfiguration("use_sim_time"),
-                    "object_filter.enabled": object_filter_enabled,
-                    "object_filter.detections_topic": detections_topic,
-                    "object_filter.instance_masks_topic": instance_masks_topic,
-                    "object_filter.camera_info_topic": camera_info_topic,
                 },
             ],
         )
@@ -65,14 +43,6 @@ def generate_launch_description():
         [
             DeclareLaunchArgument("camera_name", default_value="zed"),
             DeclareLaunchArgument("point_cloud_topic", default_value=""),
-            DeclareLaunchArgument(
-                "object_filter_enabled",
-                default_value="false",
-                choices=["true", "false"],
-            ),
-            DeclareLaunchArgument("detections_topic", default_value=""),
-            DeclareLaunchArgument("instance_masks_topic", default_value=""),
-            DeclareLaunchArgument("camera_info_topic", default_value=""),
             DeclareLaunchArgument("map_frame", default_value="map"),
             DeclareLaunchArgument("use_sim_time", default_value="false"),
             DeclareLaunchArgument(

@@ -464,19 +464,6 @@ Visualization Manager:
             Reliability Policy: Reliable
             Value: /terrain_geometry/markers
           Value: true
-        - Class: rviz_default_plugins/MarkerArray
-          Enabled: true
-          Name: Segmentation 3D Boxes
-          Namespaces:
-            boxes_3d: true
-          Topic:
-            Depth: 1
-            Durability Policy: Volatile
-            Filter size: 10
-            History Policy: Keep Last
-            Reliability Policy: Best Effort
-            Value: /segmentation/boxes_3d
-          Value: true
       Enabled: true
       Name: Terrain
     - Class: rviz_common/Group

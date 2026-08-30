@@ -1,1 +1,1 @@
-"""RGB segmentation overlay and depth-based 3D boxes for ROS 2."""
+"""RGB segmentation overlay for ROS 2."""
