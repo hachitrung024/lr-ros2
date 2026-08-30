@@ -53,6 +53,7 @@ def launch_setup(context, *args, **kwargs):
     camera_model_val = camera_model.perform(context)
     start_segmentation_val = start_segmentation_node.perform(context).lower()
     segmentation_model_path_val = segmentation_model_path.perform(context).strip()
+    svo_mode_val = svo_path.perform(context) != 'live'
 
     # A model path is the complete signal that segmentation was requested.
     # Keep the explicit flag for compatibility, but let a non-empty path
@@ -105,7 +106,10 @@ def launch_setup(context, *args, **kwargs):
         name=camera_model_val + '_rviz2',
         output='screen',
         arguments=[['-d'], [config_rviz2]],
-        parameters=[{'use_sim_time': publish_svo_clock}],
+        parameters=[{
+            'use_sim_time': publish_svo_clock,
+            'svo_mode': svo_mode_val,
+        }],
         remappings=rviz_remappings
     )
 

@@ -1,0 +1,10 @@
+<library path="lr_display_rviz2_plugins">
+  <class
+    name="lr_display_rviz2/SvoControl"
+    type="lr_display_rviz2::SvoControlPanel"
+    base_class_type="rviz_common::Panel">
+    <description>
+      Controls ZED SVO playback and displays the current file and frame.
+    </description>
+  </class>
+</library>

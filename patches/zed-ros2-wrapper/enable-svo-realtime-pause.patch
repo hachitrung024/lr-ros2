@@ -1,0 +1,30 @@
+diff --git a/zed_components/src/tools/include/sl_tools.hpp b/zed_components/src/tools/include/sl_tools.hpp
+index 94e7cca..741a619 100644
+--- a/zed_components/src/tools/include/sl_tools.hpp
++++ b/zed_components/src/tools/include/sl_tools.hpp
+@@ -32,8 +32,10 @@
+ 
+ #include <rcutils/logging_macros.h>
+ 
+-// Used to enable ZED SDK RealTime SVO pause
+-//#define USE_SVO_REALTIME_PAUSE
++// ZED SDK 5.4 provides pauseSVOReading() specifically for real-time SVO input.
++#if (ZED_SDK_MAJOR_VERSION * 10 + ZED_SDK_MINOR_VERSION) >= 54
++  #define USE_SVO_REALTIME_PAUSE
++#endif
+ 
+ // Used to enable Positional Tracking lock check
+ //#define ENABLE_PT_LOCK_CHECK
+diff --git a/zed_components/src/zed_camera_one/src/zed_camera_one_component_main.cpp b/zed_components/src/zed_camera_one/src/zed_camera_one_component_main.cpp
+index 198ca18..146a9f0 100644
+--- a/zed_components/src/zed_camera_one/src/zed_camera_one_component_main.cpp
++++ b/zed_components/src/zed_camera_one/src/zed_camera_one_component_main.cpp
+@@ -1948,7 +1948,7 @@ void ZedCameraOne::threadFunc_zedGrab()
+           rclcpp::sleep_for(100ms);
+ #ifdef USE_SVO_REALTIME_PAUSE
+           // Dummy grab
+-          mZed->grab();
++          _zed->grab();
+ #endif
+           continue;
+         } else {

@@ -52,6 +52,27 @@ endif()
 
 find_package(ament_cmake_auto REQUIRED)
 ament_auto_find_build_dependencies()
+find_package(Qt5 REQUIRED COMPONENTS Widgets)
+
+set(CMAKE_AUTOMOC ON)
+
+ament_auto_add_library(${PROJECT_NAME}_plugins SHARED
+  include/lr_display_rviz2/svo_control_panel.hpp
+  src/svo_control_panel.cpp
+)
+target_include_directories(${PROJECT_NAME}_plugins PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+target_link_libraries(${PROJECT_NAME}_plugins Qt5::Widgets)
+
+pluginlib_export_plugin_description_file(rviz_common plugin_description.xml)
+
+install(TARGETS ${PROJECT_NAME}_plugins
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION bin
+)
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
@@ -76,6 +97,10 @@ install(DIRECTORY
 install(DIRECTORY
   rviz2
   DESTINATION share/${PROJECT_NAME}
+)
+
+install(DIRECTORY include/
+  DESTINATION include
 )
 
 ament_package()

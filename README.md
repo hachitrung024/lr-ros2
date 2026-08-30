@@ -23,6 +23,20 @@ colcon build --symlink-install \
 source install/setup.bash
 ```
 
+To enable real-time SVO pause with ZED SDK 5.4 or newer, build
+`zed_components` through the workspace helper:
+
+```bash
+cd /workspace/testros2
+source /opt/ros/humble/setup.bash
+./scripts/build_zed_realtime_pause.sh
+source install/setup.bash
+```
+
+The helper temporarily applies the tracked compatibility patch, builds the ZED
+component, and restores the `zed-ros2-wrapper` submodule before it exits. Extra
+`colcon build` arguments can be passed directly to the helper.
+
 The segmentation model must be an instance-segmentation YOLO model and must
 exist on the filesystem, for example:
 
