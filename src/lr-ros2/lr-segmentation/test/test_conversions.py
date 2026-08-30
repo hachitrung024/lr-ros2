@@ -8,6 +8,7 @@ from lr_segmentation.conversions import (
     bgr_to_image_message,
     image_message_to_bgr,
 )
+from lr_segmentation.depth_boxes import depth_message_to_meters
 
 
 def header():
@@ -67,3 +68,42 @@ def test_image_adapter_rejects_invalid_messages():
 
     with pytest.raises(ValueError, match="image_bgr"):
         bgr_to_image_message(np.zeros((2, 2), dtype=np.uint8), header())
+
+
+@pytest.mark.parametrize(
+    "encoding,dtype,source,expected",
+    [
+        ("32FC1", np.float32, [[1.25, 2.5]], [[1.25, 2.5]]),
+        ("16UC1", np.uint16, [[1250, 2500]], [[1.25, 2.5]]),
+        ("mono16", np.uint16, [[1250, 2500]], [[1.25, 2.5]]),
+    ],
+)
+def test_depth_adapter_converts_supported_encodings_to_meters(
+    encoding,
+    dtype,
+    source,
+    expected,
+):
+    values = np.asarray(source, dtype=dtype)
+    message = Image()
+    message.height = 1
+    message.width = 2
+    message.encoding = encoding
+    message.step = values.nbytes
+    message.data = values.tobytes()
+
+    depth = depth_message_to_meters(message)
+    assert depth.dtype == np.float32
+    assert np.allclose(depth, expected)
+
+
+def test_depth_adapter_rejects_unsupported_encoding():
+    message = Image(
+        height=1,
+        width=2,
+        encoding="8UC1",
+        step=2,
+        data=b"12",
+    )
+    with pytest.raises(ValueError, match="Unsupported depth"):
+        depth_message_to_meters(message)

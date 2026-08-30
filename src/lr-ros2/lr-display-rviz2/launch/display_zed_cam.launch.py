@@ -170,6 +170,14 @@ def launch_setup(context, *args, **kwargs):
                         f'/{camera_name_val}/zed_node/'
                         'rgb/color/rect/image'
                     ),
+                    'input.depth_topic': (
+                        f'/{camera_name_val}/zed_node/'
+                        'depth/depth_registered'
+                    ),
+                    'input.camera_info_topic': (
+                        f'/{camera_name_val}/zed_node/'
+                        'rgb/color/rect/camera_info'
+                    ),
                     'model.path': segmentation_model_path,
                     'use_sim_time': publish_svo_clock,
                 }

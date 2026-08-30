@@ -16,6 +16,14 @@ def launch_setup(context, *args, **kwargs):
     image_topic = LaunchConfiguration("image_topic").perform(context)
     if not image_topic:
         image_topic = f"/{camera_name}/zed_node/rgb/color/rect/image"
+    depth_topic = LaunchConfiguration("depth_topic").perform(context)
+    if not depth_topic:
+        depth_topic = f"/{camera_name}/zed_node/depth/depth_registered"
+    camera_info_topic = LaunchConfiguration("camera_info_topic").perform(context)
+    if not camera_info_topic:
+        camera_info_topic = (
+            f"/{camera_name}/zed_node/rgb/color/rect/camera_info"
+        )
     return [
         Node(
             package="lr_segmentation",
@@ -26,6 +34,8 @@ def launch_setup(context, *args, **kwargs):
                 LaunchConfiguration("segmentation_params_file"),
                 {
                     "input.image_topic": image_topic,
+                    "input.depth_topic": depth_topic,
+                    "input.camera_info_topic": camera_info_topic,
                     "model.path": LaunchConfiguration("model_path"),
                     "use_sim_time": LaunchConfiguration("use_sim_time"),
                 },
@@ -45,6 +55,8 @@ def generate_launch_description():
         [
             DeclareLaunchArgument("camera_name", default_value="zed"),
             DeclareLaunchArgument("image_topic", default_value=""),
+            DeclareLaunchArgument("depth_topic", default_value=""),
+            DeclareLaunchArgument("camera_info_topic", default_value=""),
             DeclareLaunchArgument("model_path"),
             DeclareLaunchArgument("use_sim_time", default_value="false"),
             DeclareLaunchArgument(

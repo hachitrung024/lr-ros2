@@ -74,11 +74,11 @@ $ ros2 launch lr_display_rviz2 display_zed_cam.launch.py \
 The `start_segmentation_node` argument defaults to `auto`; use
 `start_segmentation_node:=false` to explicitly disable segmentation.
 
-The existing RGB dock then shows `/segmentation/overlay`, the node's only
-output. When no model path is provided, segmentation is disabled and the same
-dock is remapped to the original ZED RGB image. The original RGB topic is also
-retained as the disabled `ZED RGB` display. Terrain processing remains
-independent and does not consume segmentation output.
+The existing RGB dock then shows `/segmentation/overlay`. The
+`Segmentation 3D Boxes` display renders `/segmentation/boxes_3d` over the ZED
+registered point cloud. When no model path is provided, segmentation is
+disabled and the RGB dock is remapped to the original ZED RGB image. Terrain
+processing remains independent and does not consume segmentation output.
 
 ![ZED rendering on Rviz](images/depthcloud-RGB.jpg)
 ![ZED rendering on Rviz](images/ZEDM-Rviz.jpg)

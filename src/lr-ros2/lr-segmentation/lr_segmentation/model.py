@@ -1,15 +1,44 @@
-"""Ultralytics adapter that returns a rendered segmentation overlay."""
+"""Ultralytics adapter for overlay images and 2D boxes."""
 
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 
 
-class UltralyticsOverlayModel:
-    """Load YOLO once and render its segmentation result for each image."""
+@dataclass(frozen=True)
+class Box2D:
+    """One model detection in source-image pixel coordinates."""
+
+    xyxy: tuple[float, float, float, float]
+    class_id: int
+    class_name: str
+    confidence: float
+
+
+@dataclass(frozen=True)
+class SegmentationPrediction:
+    """Rendered overlay and boxes produced by one inference."""
+
+    overlay_bgr: np.ndarray
+    boxes: tuple[Box2D, ...]
+
+
+def _as_numpy(value) -> np.ndarray:
+    if hasattr(value, "detach"):
+        value = value.detach()
+    if hasattr(value, "cpu"):
+        value = value.cpu()
+    if hasattr(value, "numpy"):
+        value = value.numpy()
+    return np.asarray(value)
+
+
+class UltralyticsSegmentationModel:
+    """Load YOLO once and render its result for each image."""
 
     def __init__(
         self,
@@ -48,12 +77,41 @@ class UltralyticsOverlayModel:
             "verbose": False,
         }
 
-    def predict_overlay(self, image_bgr: np.ndarray) -> np.ndarray:
-        """Run inference and return the rendered BGR overlay."""
+    def predict(self, image_bgr: np.ndarray) -> SegmentationPrediction:
+        """Run inference and return its rendered overlay and 2D boxes."""
         result = self._model.predict(source=image_bgr, **self._arguments)[0]
-        return np.asarray(result.plot(), dtype=np.uint8)
+        detections = []
+        if result.boxes is not None:
+            coordinates = _as_numpy(result.boxes.xyxy)
+            class_ids = _as_numpy(result.boxes.cls).astype(np.int32)
+            confidences = _as_numpy(result.boxes.conf)
+            names = result.names
+            for xyxy, class_id, confidence in zip(
+                coordinates,
+                class_ids,
+                confidences,
+            ):
+                numeric_id = int(class_id)
+                class_name = (
+                    str(names.get(numeric_id, numeric_id))
+                    if isinstance(names, dict)
+                    else str(names[numeric_id])
+                )
+                detections.append(
+                    Box2D(
+                        tuple(float(value) for value in xyxy),
+                        numeric_id,
+                        class_name,
+                        float(confidence),
+                    )
+                )
+
+        return SegmentationPrediction(
+            np.asarray(result.plot(), dtype=np.uint8),
+            tuple(detections),
+        )
 
 
-def create_overlay_model(**kwargs) -> UltralyticsOverlayModel:
-    """Create the supported overlay model."""
-    return UltralyticsOverlayModel(**kwargs)
+def create_segmentation_model(**kwargs) -> UltralyticsSegmentationModel:
+    """Create the supported segmentation model."""
+    return UltralyticsSegmentationModel(**kwargs)

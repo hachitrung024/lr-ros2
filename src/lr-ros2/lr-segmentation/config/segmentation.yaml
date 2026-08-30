@@ -1,8 +1,17 @@
 segmentation:
   ros__parameters:
     input.image_topic: /zed/zed_node/rgb/color/rect/image
+    input.depth_topic: /zed/zed_node/depth/depth_registered
+    input.camera_info_topic: /zed/zed_node/rgb/color/rect/camera_info
     model.path: ""
     model.device: "0"
     model.confidence: 0.25
     model.image_size: 960
     model.iou: 0.60
+
+    box3d.sync_tolerance_sec: 0.05
+    box3d.minimum_depth_m: 0.2
+    box3d.maximum_depth_m: 20.0
+    box3d.depth_tolerance_m: 0.25
+    box3d.depth_tolerance_ratio: 0.08
+    box3d.minimum_points: 20

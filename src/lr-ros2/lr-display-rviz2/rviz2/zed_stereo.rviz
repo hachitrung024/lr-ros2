@@ -479,17 +479,16 @@ Visualization Manager:
           Value: true
         - Class: rviz_default_plugins/MarkerArray
           Enabled: true
-          Name: Detected Object Boxes
+          Name: Segmentation 3D Boxes
           Namespaces:
-            object_boxes: true
-            object_labels: true
+            boxes_3d: true
           Topic:
             Depth: 1
             Durability Policy: Volatile
             Filter size: 10
             History Policy: Keep Last
             Reliability Policy: Best Effort
-            Value: /terrain_geometry/object_box_markers
+            Value: /segmentation/boxes_3d
           Value: true
       Enabled: true
       Name: Terrain

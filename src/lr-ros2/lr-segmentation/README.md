@@ -1,16 +1,14 @@
 # LR Segmentation
 
-Minimal ROS 2 Humble node that reads a ZED color image, runs an Ultralytics
-segmentation model, and publishes the rendered RGB overlay.
+ROS 2 Humble node that runs an Ultralytics segmentation model on ZED RGB,
+renders the RGB overlay, and estimates simple 3D boxes from the model's 2D
+boxes plus the registered depth image.
 
 ## Install
 
 ```bash
 python3 -m pip install -r src/lr-ros2/lr-segmentation/requirements.txt
 ```
-
-The YOLO segmentation checkpoint stays external and must exist when the node
-starts.
 
 ## Run
 
@@ -20,11 +18,24 @@ ros2 launch lr_segmentation segmentation.launch.py \
   model_path:=/workspace/testros2/models/best.pt
 ```
 
-## ROS interface
+The launch derives these registered ZED inputs from `camera_name`:
 
-- Input parameter: `input.image_topic` (`sensor_msgs/msg/Image`).
-- Only output: `~/overlay` (`sensor_msgs/msg/Image`, encoding `rgb8`).
+- RGB: `/<camera>/zed_node/rgb/color/rect/image`
+- Depth: `/<camera>/zed_node/depth/depth_registered`
+- Intrinsics: `/<camera>/zed_node/rgb/color/rect/camera_info`
 
-The remaining model parameters are in `config/segmentation.yaml`. The node has
-no detections, masks, diagnostics, reset service, point-cloud input, merging,
-or 3D processing.
+They can be overridden with `image_topic`, `depth_topic`, and
+`camera_info_topic`.
+
+## Outputs
+
+- `~/overlay`: rendered `sensor_msgs/msg/Image` with `rgb8` encoding.
+- `~/boxes_3d`: `visualization_msgs/msg/MarkerArray` wireframe boxes in the
+  depth optical frame.
+
+For each 2D detection, the node estimates the robust 1st-to-99th percentile
+depth span in the center of the box, keeps pixels in the full box near that
+span, back-projects them with `CameraInfo`, rejects the outer 5% as outliers,
+and fits an axis-aligned box. This is deliberately a simple approximation: a
+segmentation mask or point-cloud clustering will be more accurate when a 2D
+box contains much background.
