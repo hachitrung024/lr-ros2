@@ -34,6 +34,18 @@ def _stamp_seconds(stamp) -> float:
     return float(stamp.sec) + float(stamp.nanosec) * 1e-9
 
 
+def _coerce_string_parameter(node: Node, name: str, default: str) -> str:
+    """Read a string parameter, accepting integer CLI overrides like device:=0."""
+    if not node.has_parameter(name):
+        node.declare_parameter(name, default, ParameterDescriptor(read_only=True))
+    param = node.get_parameter(name)
+    if param.type_ == Parameter.Type.INTEGER:
+        return str(param.value)
+    if param.type_ == Parameter.Type.DOUBLE:
+        return str(int(param.value))
+    return str(param.value)
+
+
 class SegmentationNode(Node):
     """Run inference on only the freshest pending ZED image."""
 
@@ -50,8 +62,8 @@ class SegmentationNode(Node):
             "/zed/zed_node/rgb/color/rect/image",
             read_only,
         ).value
-        model_path = self.declare_parameter("model.path", "", read_only).value
-        model_device = self.declare_parameter("model.device", "0", read_only).value
+        model_path = _coerce_string_parameter(self, "model.path", "")
+        model_device = _coerce_string_parameter(self, "model.device", "0")
         confidence = self.declare_parameter(
             "model.confidence", 0.25, read_only
         ).value
