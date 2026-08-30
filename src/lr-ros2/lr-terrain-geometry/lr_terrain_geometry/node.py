@@ -43,6 +43,7 @@ from .object_filter import (
     ObjectFilterConfig,
     eligible_detections,
     filter_points_in_instance_masks,
+    transform_object_boxes_to_map,
 )
 
 
@@ -659,6 +660,11 @@ class TerrainGeometryNode(Node):
                     message,
                     detections,
                     instance_masks,
+                    sensor_to_map=(
+                        sensor_to_map
+                        if message.header.frame_id == self._map_frame
+                        else None
+                    ),
                 )
             except (TransformException, TypeError, ValueError) as error:
                 self._filter_failure_count += 1
@@ -697,6 +703,7 @@ class TerrainGeometryNode(Node):
         cloud: PointCloud2,
         detections: Detection2DArray,
         instance_masks: Image | None,
+        sensor_to_map: np.ndarray | None = None,
     ) -> np.ndarray:
         selected = eligible_detections(
             detections.detections,
@@ -724,9 +731,14 @@ class TerrainGeometryNode(Node):
             )
         if labels.size and int(np.max(labels)) > len(detections.detections):
             raise ValueError("instance mask contains an unknown detection ID")
+        points_frame = cloud.header.frame_id
+        if cloud.header.frame_id == self._map_frame:
+            # Map clouds are converted back to sensor-frame XYZ for terrain
+            # fitting; object projection must use the same coordinate frame.
+            points_frame = self._sensor_frame
         cloud_to_image_transform = self._tf_buffer.lookup_transform(
             camera_info.header.frame_id,
-            cloud.header.frame_id,
+            points_frame,
             Time.from_msg(cloud.header.stamp),
             timeout=Duration(seconds=self._tf_timeout_sec),
         )
@@ -745,6 +757,12 @@ class TerrainGeometryNode(Node):
             projection,
             self._object_filter_config,
         )
+        if (
+            cloud.header.frame_id == self._map_frame
+            and sensor_to_map is not None
+            and boxes
+        ):
+            boxes = transform_object_boxes_to_map(boxes, sensor_to_map)
         self._last_box_count = len(boxes)
         self._last_removed_point_count = removed_count
         self._total_removed_point_count += removed_count

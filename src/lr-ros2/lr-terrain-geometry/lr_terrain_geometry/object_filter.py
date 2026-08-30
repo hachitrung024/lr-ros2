@@ -325,6 +325,36 @@ def _fit_oriented_box(
     )
 
 
+def transform_object_boxes_to_map(
+    boxes: tuple[ObjectBox3D, ...],
+    sensor_to_map: np.ndarray,
+) -> tuple[ObjectBox3D, ...]:
+    """Express sensor-frame boxes in the map frame using sensor->map TF."""
+    transform = _validated_matrix(sensor_to_map, (4, 4), "sensor_to_map")
+    rotation = transform[:3, :3]
+    translation = transform[:3, 3]
+    transformed: list[ObjectBox3D] = []
+    for box in boxes:
+        center = rotation @ box.center + translation
+        heading = rotation @ np.asarray([
+            math.cos(box.yaw),
+            math.sin(box.yaw),
+            0.0,
+        ], dtype=np.float64)
+        yaw = math.atan2(float(heading[1]), float(heading[0]))
+        transformed.append(
+            ObjectBox3D(
+                detection_id=box.detection_id,
+                class_id=box.class_id,
+                confidence=box.confidence,
+                center=center,
+                size=np.asarray(box.size, dtype=np.float64),
+                yaw=yaw,
+            )
+        )
+    return tuple(transformed)
+
+
 def filter_points_in_instance_masks(
     points_cloud,
     detections,
