@@ -1,0 +1,6 @@
+2026-07-10T15:57:05.003620+00:00 [INFO] [mavlink] Session recorder initialized: /mnt/media_pool/drive1/session_20260710_0857_mavlink
+2026-07-10T15:57:05.004136+00:00 [INFO] [MAVLink Logger] Starting recording
+2026-07-10T15:57:05.075922+00:00 [INFO] [MAVLink Logger] Wrote meta.json to /mnt/media_pool/drive1/session_20260710_0857_mavlink
+2026-07-10T15:57:05.077467+00:00 [INFO] [MAVLink Logger] Recording started: /mnt/media_pool/drive1/session_20260710_0857_mavlink/session_mavlink.db
+2026-07-10T15:57:25.082956+00:00 [CRITICAL] [MAVLink Logger] Recording active for 20s but ZERO telemetry samples have been received. The database will remain empty until this is resolved — check the MAVLink connection URL/state; this recorder's connection may never be reaching CONNECTED even though other consumers on the bus see data.
+2026-07-10T16:22:07.543438+00:00 [INFO] [MAVLink Logger] Recording stopped. Total samples queued this session: 0

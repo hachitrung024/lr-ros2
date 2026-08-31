@@ -1,0 +1,4 @@
+2026-07-09T20:57:03.505293+00:00 [INFO] [mavlink] Session recorder initialized: /mnt/media_pool/drive1/session_20260709_1357_mavlink
+2026-07-09T20:57:03.505935+00:00 [INFO] [MAVLink Logger] Starting recording
+2026-07-09T20:57:03.593608+00:00 [INFO] [MAVLink Logger] Wrote meta.json to /mnt/media_pool/drive1/session_20260709_1357_mavlink
+2026-07-09T20:57:03.594779+00:00 [INFO] [MAVLink Logger] Recording started: /mnt/media_pool/drive1/session_20260709_1357_mavlink/session_mavlink.db

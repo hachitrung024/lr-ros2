@@ -1,0 +1,5 @@
+2026-07-09T21:43:36.559161+00:00 [INFO] [mavlink] Session recorder initialized: /mnt/media_pool/drive1/session_20260709_1443_mavlink
+2026-07-09T21:43:36.559988+00:00 [INFO] [MAVLink Logger] Starting recording
+2026-07-09T21:43:36.634770+00:00 [INFO] [MAVLink Logger] Wrote meta.json to /mnt/media_pool/drive1/session_20260709_1443_mavlink
+2026-07-09T21:43:36.636376+00:00 [INFO] [MAVLink Logger] Recording started: /mnt/media_pool/drive1/session_20260709_1443_mavlink/session_mavlink.db
+2026-07-09T21:44:00.637163+00:00 [INFO] [MAVLink Logger] Recording stopped. Total samples queued this session: 1147
