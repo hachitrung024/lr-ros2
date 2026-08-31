@@ -1,8 +1,8 @@
 # LR Segmentation
 
 ROS 2 Humble nodes that run an Ultralytics segmentation model on ZED RGB,
-publish a rendered overlay and instance-label image, then project that mask
-through registered depth into a labeled 3D point cloud.
+publish a rendered overlay and instance-label image, then estimate tracked,
+light-weight oriented 3D boxes from the masks and registered depth.
 
 ## Install
 
@@ -25,7 +25,7 @@ The launch derives registered ZED inputs from `camera_name`:
 - Intrinsics: `/<camera>/zed_node/rgb/color/rect/camera_info`
 
 They can be overridden with `image_topic`, `depth_topic`, and
-`camera_info_topic`. Set `start_mask_projector_3d:=false` to run only the
+`camera_info_topic`. Set `start_box_estimator_3d:=false` to run only the
 image-domain segmentation node.
 
 ## Outputs
@@ -33,9 +33,13 @@ image-domain segmentation node.
 - `~/overlay`: rendered `sensor_msgs/msg/Image` with `rgb8` encoding.
 - `~/instance_mask`: `sensor_msgs/msg/Image` with `mono16` encoding. Zero is
   background; positive values are per-frame instance IDs.
-- `/segmentation/mask_cloud`: `sensor_msgs/msg/PointCloud2` in the registered
-  depth frame with `x`, `y`, `z`, `rgb`, and `instance_id` fields.
+- `/segmentation/boxes_3d`: `vision_msgs/msg/Detection3DArray`. Every detection
+  contains an oriented metric `BoundingBox3D` and a stable tracker ID.
+- `/segmentation/box_markers`: `visualization_msgs/msg/MarkerArray` for RViz
+  only; it contains transparent box cubes and their tracker IDs.
 
-The projector synchronizes mask and depth within 50 ms. Invalid depth is
-discarded, output is capped at 200,000 points, and RViz colors each instance
-with a stable per-frame palette.
+The estimator synchronizes mask and depth within 50 ms. It filters depth
+outliers, fits an oriented box with a gravity-aligned vertical axis, and applies
+a constant-velocity Kalman filter. The default output frame is `map`; set
+`box_frame:=<camera_optical_frame>` and configure `geometry.up_axis` if no
+world-frame TF is available.

@@ -42,8 +42,8 @@ def launch_setup(context, *args, **kwargs):
         ),
         Node(
             package="lr_segmentation",
-            executable="mask_projector_3d_node",
-            name="mask_projector_3d",
+            executable="box_estimator_3d_node",
+            name="box_estimator_3d",
             output="screen",
             parameters=[
                 LaunchConfiguration("segmentation_params_file"),
@@ -51,14 +51,13 @@ def launch_setup(context, *args, **kwargs):
                     "input.mask_topic": "/segmentation/instance_mask",
                     "input.depth_topic": depth_topic,
                     "input.camera_info_topic": camera_info_topic,
-                    "output.cloud_topic": LaunchConfiguration(
-                        "mask_cloud_topic"
-                    ),
+                    "output.box_topic": LaunchConfiguration("box_topic"),
+                    "output.frame_id": LaunchConfiguration("box_frame"),
                     "use_sim_time": LaunchConfiguration("use_sim_time"),
                 },
             ],
             condition=IfCondition(
-                LaunchConfiguration("start_mask_projector_3d")
+                LaunchConfiguration("start_box_estimator_3d")
             ),
         ),
     ]
@@ -80,13 +79,17 @@ def generate_launch_description():
             DeclareLaunchArgument("model_path"),
             DeclareLaunchArgument("use_sim_time", default_value="false"),
             DeclareLaunchArgument(
-                "start_mask_projector_3d",
+                "start_box_estimator_3d",
                 default_value="true",
                 choices=["true", "false"],
             ),
             DeclareLaunchArgument(
-                "mask_cloud_topic",
-                default_value="/segmentation/mask_cloud",
+                "box_topic",
+                default_value="/segmentation/boxes_3d",
+            ),
+            DeclareLaunchArgument(
+                "box_frame",
+                default_value="map",
             ),
             DeclareLaunchArgument(
                 "segmentation_params_file",

@@ -7,14 +7,29 @@ segmentation:
     model.image_size: 960
     model.iou: 0.60
 
-mask_projector_3d:
+box_estimator_3d:
   ros__parameters:
     input.mask_topic: /segmentation/instance_mask
     input.depth_topic: /zed/zed_node/depth/depth_registered
     input.camera_info_topic: /zed/zed_node/rgb/color/rect/camera_info
-    output.cloud_topic: /segmentation/mask_cloud
+    output.box_topic: /segmentation/boxes_3d
+    output.marker_topic: /segmentation/box_markers
+    output.frame_id: map
+    geometry.up_axis: [0.0, 0.0, 1.0]
     sync_tolerance_sec: 0.05
     minimum_depth_m: 0.2
     maximum_depth_m: 20.0
-    sampling_stride: 1
-    maximum_points: 200000
+    sampling_stride: 2
+    maximum_points_per_instance: 15000
+    minimum_points_per_instance: 64
+    depth_mad_scale: 8.0
+    minimum_depth_band_m: 0.15
+    box.trim_fraction: 0.02
+    box.minimum_size_m: 0.05
+    tracking.association_distance_m: 1.0
+    tracking.max_missed_frames: 5
+    tracking.min_confirmations: 2
+    tracking.measurement_stddev_m: 0.08
+    tracking.acceleration_stddev_mps2: 1.0
+    tracking.size_smoothing: 0.35
+    tracking.orientation_smoothing: 0.35

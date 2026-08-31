@@ -62,7 +62,7 @@ Therefore, you do not need to add `start_segmentation_node:=true`.
 The pipeline will:
 
 1. Read the image and point cloud from the ZED camera.
-2. Run instance segmentation and publish an RGB overlay plus 3D box markers.
+2. Run instance segmentation and publish an RGB overlay plus tracked 3D boxes.
 3. Process terrain independently from the point cloud.
 4. Display the overlay and terrain results in RViz.
 

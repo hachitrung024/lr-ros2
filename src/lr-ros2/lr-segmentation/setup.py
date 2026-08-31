@@ -22,13 +22,13 @@ setup(
     zip_safe=True,
     maintainer="Landfill Rover",
     maintainer_email="maintainers@example.com",
-    description="RGB segmentation overlay and depth-projected 3D masks",
+    description="RGB segmentation and lightweight tracked 3D box estimation",
     license="Apache-2.0",
     extras_require={"test": ["pytest"]},
     entry_points={
         "console_scripts": [
             "segmentation_node = lr_segmentation.node:main",
-            "mask_projector_3d_node = lr_segmentation.mask_projector_3d:main",
+            "box_estimator_3d_node = lr_segmentation.box_estimator_3d:main",
         ],
     },
 )

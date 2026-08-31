@@ -181,10 +181,10 @@ def launch_setup(context, *args, **kwargs):
         )
         nodes.append(segmentation_node)
 
-        mask_projector_node = Node(
+        box_estimator_node = Node(
             package='lr_segmentation',
-            executable='mask_projector_3d_node',
-            name='mask_projector_3d',
+            executable='box_estimator_3d_node',
+            name='box_estimator_3d',
             output='screen',
             parameters=[
                 segmentation_params_file,
@@ -198,13 +198,15 @@ def launch_setup(context, *args, **kwargs):
                         f'/{camera_name_val}/zed_node/'
                         'rgb/color/rect/camera_info'
                     ),
-                    'output.cloud_topic': '/segmentation/mask_cloud',
+                    'output.box_topic': '/segmentation/boxes_3d',
+                    'output.frame_id': map_frame,
+                    'geometry.up_axis': [0.0, 0.0, 1.0],
                     'use_sim_time': publish_svo_clock,
                 }
             ],
             condition=IfCondition(TextSubstitution(text=start_segmentation_val))
         )
-        nodes.append(mask_projector_node)
+        nodes.append(box_estimator_node)
 
     return nodes
 
