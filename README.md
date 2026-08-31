@@ -1,5 +1,12 @@
 # Landfill Rover ROS 2
 
+## Prediction Integration Review
+
+For the validated Prediction integration snapshot, terrain-normal review
+requirements, interface constraints, and local review workflow, see:
+
+[INTEGRATION_REVIEW_REQUIREMENTS.md](INTEGRATION_REVIEW_REQUIREMENTS.md)
+
 Quick instructions for running the ZED camera, segmentation, and terrain
 geometry nodes in this workspace.
 
