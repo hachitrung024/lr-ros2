@@ -1,183 +1,120 @@
 # Landfill Rover ROS 2
 
-Quick instructions for running the ZED camera, segmentation, and terrain
-geometry nodes in this workspace.
+## Lệnh chạy đầy đủ
 
-## 1. Prepare the workspace
-
-Source the ROS 2 environment in every terminal that runs ROS 2 commands:
+Lệnh dưới đây chạy SVO, tự tìm session MAVLink tương ứng, dùng MAVLink thay TF
+động của ZED, phát future path, chạy segmentation, terrain và RViz:
 
 ```bash
-cd /workspace/testros2
-source /opt/ros/humble/setup.bash
-source install/setup.bash
+ros2 launch lr_display_rviz2 display_zed_cam.launch.py \
+  start_zed_node:=true \
+  camera_name:=zed \
+  camera_model:=zed2i \
+  svo_path:=/path/to/recording.svo2 \
+  svo_realtime:=true \
+  publish_svo_clock:=true \
+  mavlink:=true \
+  mavlink_dir:=/path/to/mavlink \
+  mavlink_db_path:='' \
+  mavlink_pose_topic:=/lr/mavlink/pose \
+  mavlink_match_tolerance_s:=60.0 \
+  mavlink_max_gps_gap_s:=1.5 \
+  mavlink_body_to_camera:='[0,0,0,0,0,0]' \
+  future_path:=true \
+  future_path_topic:=/lr/future_path/ground_truth \
+  future_path_radius_m:=15.0 \
+  future_path_step_m:=0.2 \
+  future_path_cache_dir:=/path/to/future_path_cache \
+  future_path_rebuild_cache:=false \
+  start_segmentation_node:=auto \
+  segmentation_model_path:=/path/to/best.pt \
+  segmentation_params_file:=/path/to/segmentation.yaml \
+  start_terrain_node:=true \
+  terrain_params_file:=/path/to/terrain_geometry.yaml \
+  map_frame:=map
 ```
 
-If you have just modified the code or cloned the workspace, build the main packages:
+`mavlink_db_path:=''` nghĩa là tự tìm đệ quy các file `session_mavlink.db`
+trong `mavlink_dir`. Để chọn trực tiếp một database, dùng:
 
 ```bash
-cd /workspace/testros2
+mavlink_db_path:=/path/to/session_mavlink.db
+```
+
+Khi `mavlink:=true`, future path được đọc trực tiếp từ database MAVLink nên
+`future_path_cache_dir` và `future_path_rebuild_cache` không được sử dụng.
+
+## Build
+
+```bash
+cd /path/to/ros2_ws
 source /opt/ros/humble/setup.bash
 colcon build --symlink-install \
-  --packages-select lr_segmentation lr_terrain_geometry lr_display_rviz2
+  --packages-select \
+  lr_future_path \
+  lr_segmentation \
+  lr_terrain_geometry \
+  lr_display_rviz2
 source install/setup.bash
 ```
 
-To enable real-time SVO pause with ZED SDK 5.4 or newer, build
-`zed_components` through the workspace helper:
+## Các chế độ thường dùng
 
-```bash
-cd /workspace/testros2
-source /opt/ros/humble/setup.bash
-./scripts/build_zed_realtime_pause.sh
-source install/setup.bash
-```
-
-The helper temporarily applies the tracked compatibility patch, builds the ZED
-component, and restores the `zed-ros2-wrapper` submodule before it exits. Extra
-`colcon build` arguments can be passed directly to the helper.
-
-The segmentation model must be an instance-segmentation YOLO model and must
-exist on the filesystem, for example:
-
-```text
-/workspace/testros2/models/best.pt
-```
-
-## 2. Run the full SVO pipeline: ZED + segmentation + terrain + RViz
-
-This is the recommended way to test an SVO file:
+### SVO dùng ZED pose, không dùng MAVLink
 
 ```bash
 ros2 launch lr_display_rviz2 display_zed_cam.launch.py \
   camera_model:=zed2i \
-  svo_path:=/workspace/svo/zed_20260608_105844_0001.svo2 \
+  svo_path:=/path/to/recording.svo2 \
   publish_svo_clock:=true \
-  segmentation_model_path:=/workspace/testros2/models/best.pt
+  mavlink:=false \
+  future_path:=false \
+  segmentation_model_path:=/path/to/best.pt
 ```
 
-When `segmentation_model_path` is set, segmentation is enabled automatically.
-Therefore, you do not need to add `start_segmentation_node:=true`.
-
-The pipeline will:
-
-1. Read the image and point cloud from the ZED camera.
-2. Run instance segmentation and publish an RGB overlay plus tracked 3D boxes.
-3. Process terrain independently from the point cloud.
-4. Display the overlay and terrain results in RViz.
-
-## 3. Run an SVO without segmentation
-
-Terrain processing will still run independently:
+### Future path từ ZED VIO
 
 ```bash
 ros2 launch lr_display_rviz2 display_zed_cam.launch.py \
   camera_model:=zed2i \
-  svo_path:=/workspace/svo/zed_20260608_105844_0001.svo2 \
+  svo_path:=/path/to/recording.svo2 \
   publish_svo_clock:=true \
-  start_segmentation_node:=false
+  mavlink:=false \
+  future_path:=true \
+  future_path_cache_dir:=/path/to/future_path_cache
 ```
 
-You may also omit `start_segmentation_node:=false` when
-`segmentation_model_path` is not provided, because the default mode is `auto`
-and segmentation will not start without a model path.
+Lần chạy đầu sẽ tạo rosbag2 cache pose từ SVO. Các lần sau dùng lại cache.
 
-## 4. Run with a live camera
-
-Use `svo_path:=live` or omit the `svo_path` argument:
+### Camera live
 
 ```bash
 ros2 launch lr_display_rviz2 display_zed_cam.launch.py \
   camera_model:=zed2i \
   svo_path:=live \
-  segmentation_model_path:=/workspace/testros2/models/best.pt
+  mavlink:=false \
+  future_path:=false \
+  segmentation_model_path:=/path/to/best.pt
 ```
 
-To run without segmentation:
+MAVLink và future ground-truth path chỉ hỗ trợ SVO, không hỗ trợ camera live.
 
-```bash
-ros2 launch lr_display_rviz2 display_zed_cam.launch.py \
-  camera_model:=zed2i \
-  svo_path:=live \
-  start_segmentation_node:=false
-```
-
-## 5. Run each node separately
-
-Use three terminals. Source ROS 2 and the workspace in all three terminals.
-
-Terminal 1 — ZED:
-
-```bash
-ros2 launch zed_wrapper zed_camera.launch.py \
-  camera_model:=zed2i \
-  svo_path:=/workspace/svo/zed_20260608_105844_0001.svo2 \
-  publish_svo_clock:=true
-```
-
-Terminal 2 — segmentation:
-
-```bash
-ros2 launch lr_segmentation segmentation.launch.py \
-  camera_name:=zed \
-  model_path:=/workspace/testros2/models/best.pt \
-  use_sim_time:=true
-```
-
-Terminal 3 — terrain:
-
-```bash
-ros2 launch lr_terrain_geometry terrain_geometry.launch.py \
-  camera_name:=zed \
-  use_sim_time:=true
-```
-
-## 6. Common launch arguments
-
-| Argument | Meaning |
-|---|---|
-| `camera_model:=zed2i` | ZED camera model |
-| `svo_path:=live` | Use the live camera |
-| `svo_path:=/path/file.svo2` | Read an SVO file |
-| `publish_svo_clock:=true` | Synchronize the clock when playing an SVO |
-| `segmentation_model_path:=/path/best.pt` | Automatically enable segmentation with this model |
-| `start_segmentation_node:=false` | Explicitly disable segmentation |
-| `start_terrain_node:=false` | Do not start terrain geometry |
-| `svo_realtime:=false` | Play the SVO as fast as possible |
-
-## 7. Main output topics
-
-Segmentation:
+## Output chính
 
 ```text
+/lr/mavlink/pose
+/lr/future_path/ground_truth
 /segmentation/overlay
 /segmentation/boxes_3d
-```
-
-Terrain:
-
-```text
 /terrain_geometry/grid_map
 /terrain_geometry/markers
 /terrain_geometry/heatmap
 ```
 
-## 8. Quick troubleshooting
+MAVLink phát TF `map -> zed_camera_link` khi `camera_name:=zed`. Nếu không tìm
+được đúng một session MAVLink khớp timestamp SVO, toàn bộ launch sẽ dừng và
+không tự fallback sang ZED TF.
 
-Check the active topics:
-
-```bash
-ros2 topic list | grep -E 'segmentation|terrain_geometry|point_cloud'
-```
-
-If the model does not run, verify the path:
-
-```bash
-test -f /workspace/testros2/models/best.pt && echo OK
-```
-
-When playing an SVO, use `publish_svo_clock:=true`. The display launch gives
-every data consumer (RViz, state publisher, terrain, segmentation and 3D-box
-nodes) `use_sim_time:=true`; the ZED wrapper remains the `/clock` producer and
-must keep `use_sim_time:=false`. Seeking or looping the SVO clears the 3D-box
-TF cache and tracker before frames from the new timeline are used.
+`/lr/future_path/ground_truth` là quỹ đạo thực tế tương lai để hiển thị và
+đánh giá offline, không phải planned path và không được dùng cho điều khiển
+rover.
