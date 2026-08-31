@@ -176,5 +176,8 @@ If the model does not run, verify the path:
 test -f /workspace/testros2/models/best.pt && echo OK
 ```
 
-When playing an SVO, use `publish_svo_clock:=true` so that all nodes use the
-same SVO timestamps and TF extrapolation errors are less likely.
+When playing an SVO, use `publish_svo_clock:=true`. The display launch gives
+every data consumer (RViz, state publisher, terrain, segmentation and 3D-box
+nodes) `use_sim_time:=true`; the ZED wrapper remains the `/clock` producer and
+must keep `use_sim_time:=false`. Seeking or looping the SVO clears the 3D-box
+TF cache and tracker before frames from the new timeline are used.

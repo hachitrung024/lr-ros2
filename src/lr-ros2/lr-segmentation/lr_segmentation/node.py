@@ -99,6 +99,11 @@ def main(args=None) -> None:
         rclpy.spin(node)
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
+    except RuntimeError:
+        # See the matching handler in box_estimator_3d: rclpy can raise while
+        # taking a subscription message during process teardown.
+        if rclpy.ok():
+            raise
     finally:
         if node is not None:
             node.destroy_node()

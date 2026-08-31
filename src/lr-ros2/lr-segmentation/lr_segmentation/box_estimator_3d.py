@@ -8,6 +8,7 @@ import math
 import numpy as np
 import rclpy
 from geometry_msgs.msg import Pose
+from rclpy.clock import JumpThreshold
 from rclpy.duration import Duration
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
@@ -191,6 +192,11 @@ class BoxTracker:
         self._size_smoothing = float(size_smoothing)
         self._orientation_smoothing = float(orientation_smoothing)
         self._tracks: list[_Track] = []
+        self._next_track_id = 1
+
+    def reset(self) -> None:
+        """Discard state from a previous, now-invalid timeline."""
+        self._tracks.clear()
         self._next_track_id = 1
 
     def update(
@@ -416,6 +422,17 @@ class BoxEstimator3DNode(Node):
         self._pending_mask = None
         self._pending_depth = None
         self._camera_info = None
+        # Humble's Python TF buffer does not clear itself when /clock jumps
+        # backwards. SVO seek creates exactly that jump, so reset every state
+        # that depends on the old timeline ourselves.
+        self._time_jump_handle = self.get_clock().create_jump_callback(
+            JumpThreshold(
+                min_forward=None,
+                min_backward=Duration(nanoseconds=-1),
+                on_clock_change=True,
+            ),
+            post_callback=self._on_time_jump,
+        )
         self.get_logger().info(
             f"mask={self._mask_topic}; depth={self._depth_topic}; "
             f"boxes={self._box_topic}; markers={self._marker_topic}; "
@@ -466,6 +483,29 @@ class BoxEstimator3DNode(Node):
     def _on_camera_info(self, message: CameraInfo) -> None:
         self._camera_info = message
         self._try_estimate()
+
+    def _on_time_jump(self, _time_jump) -> None:
+        """Reset state after SVO seek or a ROS time-source change."""
+        self._pending_mask = None
+        self._pending_depth = None
+        self._tracker.reset()
+        if self._tf_buffer is not None:
+            self._tf_buffer.clear()
+
+        empty_detections = Detection3DArray()
+        empty_detections.header.frame_id = self._output_frame
+        empty_detections.header.stamp = self.get_clock().now().to_msg()
+        self._box_publisher.publish(empty_detections)
+
+        markers = MarkerArray()
+        clear = Marker()
+        clear.header = empty_detections.header
+        clear.action = Marker.DELETEALL
+        markers.markers.append(clear)
+        self._marker_publisher.publish(markers)
+        self.get_logger().info(
+            "ROS time changed; cleared 3D-box TF cache, input queue, and tracker."
+        )
 
     def _try_estimate(self) -> None:
         if (
@@ -1008,6 +1048,12 @@ def main(args=None) -> None:
         rclpy.spin(node)
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
+    except RuntimeError:
+        # A subscription may be torn down while the executor is taking its
+        # final message after SIGINT. Do not turn a clean launch shutdown into
+        # a traceback, but preserve genuine runtime failures.
+        if rclpy.ok():
+            raise
     finally:
         if node is not None:
             node.destroy_node()

@@ -127,7 +127,13 @@ def launch_setup(context, *args, **kwargs):
                 TextSubstitution(text='svo.svo_realtime:='),
                 svo_realtime
             ],
-            'publish_svo_clock': publish_svo_clock
+            'publish_svo_clock': publish_svo_clock,
+            # The ZED component is the /clock producer in SVO playback.  It
+            # must not use simulated time itself: the wrapper waits for a
+            # /clock message before grabbing, which would deadlock a clock
+            # producer.  All consumers below use publish_svo_clock as their
+            # use_sim_time value instead.
+            'use_sim_time': 'false',
         }.items(),
         condition=IfCondition(start_zed_node)
     )

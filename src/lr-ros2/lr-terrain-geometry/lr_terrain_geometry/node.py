@@ -5,12 +5,14 @@ from __future__ import annotations
 import math
 import time
 from dataclasses import fields
+from threading import RLock
 
 import numpy as np
 import rclpy
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 from grid_map_msgs.msg import GridMap
 from rcl_interfaces.msg import ParameterDescriptor
+from rclpy.clock import JumpThreshold
 from rclpy.duration import Duration
 from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
 from rclpy.node import Node
@@ -169,6 +171,18 @@ class TerrainGeometryNode(Node):
         self._last_input_frame = ""
         self._last_rover_position = np.zeros(3, dtype=np.float64)
         self._last_result = TerrainResult((), (), (), False, True, None, 0, 0)
+        self._state_lock = RLock()
+        # tf2_ros.Buffer in Humble Python does not reset itself after an SVO
+        # seek. Terrain updates run in a multi-threaded executor, so protect
+        # the estimator and TF cache while replacing the old timeline.
+        self._time_jump_handle = self.get_clock().create_jump_callback(
+            JumpThreshold(
+                min_forward=None,
+                min_backward=Duration(nanoseconds=-1),
+                on_clock_change=True,
+            ),
+            post_callback=self._on_time_jump,
+        )
 
         self.get_logger().info(
             f"Terrain geometry listening on {self._point_cloud_topic}; "
@@ -211,10 +225,30 @@ class TerrainGeometryNode(Node):
             self._record_malformed("PointCloud2 frame_id is empty")
             return
 
-        self._process_point_cloud(
-            message,
-            timestamp,
-            callback_started,
+        with self._state_lock:
+            self._process_point_cloud(
+                message,
+                timestamp,
+                callback_started,
+            )
+
+    def _on_time_jump(self, _time_jump) -> None:
+        """Clear terrain state when SVO playback moves to a new timeline."""
+        with self._state_lock:
+            self._tf_buffer.clear()
+            self._estimator.reset("ROS time changed")
+            self._last_result = TerrainResult(
+                (), (), (), False, True, "ROS time changed", 0, 0
+            )
+            self._last_error = ""
+            self._last_rover_position.fill(0.0)
+            self._publish_snapshot(
+                self._last_result,
+                self.get_clock().now().to_msg(),
+                self._last_rover_position,
+            )
+        self.get_logger().info(
+            "ROS time changed; cleared terrain TF cache and estimator state."
         )
 
     def _process_point_cloud(
@@ -329,15 +363,16 @@ class TerrainGeometryNode(Node):
 
     def _on_reset(self, request, response):
         del request
-        self._estimator.reset("manual reset")
-        self._last_result = TerrainResult(
-            (), (), (), False, True, "manual reset", 0, 0
-        )
-        self._publish_snapshot(
-            self._last_result,
-            self.get_clock().now().to_msg(),
-            self._last_rover_position,
-        )
+        with self._state_lock:
+            self._estimator.reset("manual reset")
+            self._last_result = TerrainResult(
+                (), (), (), False, True, "manual reset", 0, 0
+            )
+            self._publish_snapshot(
+                self._last_result,
+                self.get_clock().now().to_msg(),
+                self._last_rover_position,
+            )
         response.success = True
         response.message = "Terrain state reset"
         return response

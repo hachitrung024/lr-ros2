@@ -100,6 +100,24 @@ def test_tracker_preserves_the_id_and_filters_position_noise():
     assert 0.0 < second[0].center[0] < 0.2
 
 
+def test_tracker_reset_starts_a_new_svo_timeline():
+    tracker = BoxTracker(
+        association_distance_m=1.0,
+        max_missed_frames=2,
+        min_confirmations=1,
+        measurement_stddev_m=0.08,
+        acceleration_stddev_mps2=1.0,
+        size_smoothing=0.5,
+        orientation_smoothing=0.5,
+    )
+    tracker.update([measurement([0.0, 0.0, 2.0])], 20.0)
+
+    tracker.reset()
+    restarted = tracker.update([measurement([0.0, 0.0, 2.0])], 5.0)
+
+    assert restarted[0].track_id == 1
+
+
 @pytest.fixture
 def ros_context():
     rclpy.init()
