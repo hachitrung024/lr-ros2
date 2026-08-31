@@ -53,6 +53,60 @@ Set `svo_realtime:=false` to process every frame instead of preserving the
 recorded timing. In that mode, playback speed can be customized through the
 ZED wrapper configuration.
 
+### SVO future ground truth
+
+Enable future_path to visualize an offline VIO look-ahead path:
+
+    ros2 launch lr_display_rviz2 display_zed_cam.launch.py \
+        camera_model:=zed2i \
+        svo_path:=/path/to/recording.svo2 \
+        publish_svo_clock:=true \
+        future_path:=true
+
+On the first run, the launch performs a headless non-real-time SVO pass and
+stores a rosbag2 cache under the hidden .lr_future_path_cache directory beside
+the SVO. Once the cache is complete, the normal SVO/RViz pipeline starts
+automatically. Later runs reuse the cache immediately. Set
+future_path_rebuild_cache to true to force preprocessing again, or set
+future_path_cache_dir to choose another cache root.
+
+The output is a nav_msgs/msg/Path on /lr/future_path/ground_truth, sampled at
+0.2 m until the cached path first leaves a 15 m XY radius. It is future
+ground-truth for offline evaluation only, not a route planner or a control
+input.
+
+### MAVLink localization for SVO
+
+An SVO can use the matching rover MAVLink SQLite session instead of ZED
+positional tracking:
+
+    ros2 launch lr_display_rviz2 display_zed_cam.launch.py \
+        camera_model:=zed2i \
+        svo_path:=/workspace/svo/zed_20260710_092420_0001.svo2 \
+        publish_svo_clock:=true \
+        mavlink:=true \
+        future_path:=true
+
+The launch recursively searches `mavlink_dir` (default: `mavlink` relative to
+the directory where the launch command runs) for `session_mavlink.db`. It
+selects the unique session matching the first SVO clock timestamp. Use
+`mavlink_db_path` to select a database explicitly.
+
+In this mode ZED dynamic TF and positional tracking are disabled. The MAVLink
+node converts valid GPS to a local ENU `map`, converts attitude from MAVLink
+NED/FRD to ROS ENU/FLU, and publishes `map -> zed_camera_link` plus
+`/lr/mavlink/pose`. The ZED URDF continues to publish the camera's static
+frames. The default camera mounting transform is identity; override
+`mavlink_body_to_camera:='[x,y,z,roll,pitch,yaw]'` when measured extrinsics
+are available.
+
+When `future_path` is also enabled, the MAVLink database directly supplies
+`/lr/future_path/ground_truth`; no VIO preprocessing pass or rosbag cache is
+created. Pose, TF, and Path are suppressed across valid-GPS gaps larger than
+`mavlink_max_gps_gap_s` (default 1.5 s), then resume automatically. This is
+recorded ground truth for offline visualization/evaluation, not a planned
+route or a control input.
+
 For stereo cameras the launch file also starts `lr_terrain_geometry` by
 default. Use `start_terrain_node:=false` to disable it, or override
 `terrain_params_file` and `map_frame` for a different terrain setup. The

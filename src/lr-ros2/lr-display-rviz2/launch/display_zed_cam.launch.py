@@ -12,6 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""Launch ZED, RViz, LR perception, and optional SVO future ground truth."""
+
+import ast
+import math
 import os
 
 from ament_index_python.packages import get_package_share_directory
@@ -20,11 +24,16 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
-    OpaqueFunction,
+    EmitEvent,
+    ExecuteProcess,
     IncludeLaunchDescription,
-    LogInfo
+    LogInfo,
+    OpaqueFunction,
+    RegisterEventHandler,
 )
 from launch.conditions import IfCondition
+from launch.event_handlers import OnProcessExit
+from launch.events import Shutdown
 from launch.substitutions import (
     LaunchConfiguration,
     TextSubstitution
@@ -32,8 +41,66 @@ from launch.substitutions import (
 from launch_ros.actions import Node
 
 
-def launch_setup(context, *args, **kwargs):
+def _stop_launch(reason):
+    def raise_error(_context):
+        raise RuntimeError(reason)
 
+    return [
+        LogInfo(msg=TextSubstitution(text=f'ERROR: {reason}')),
+        OpaqueFunction(function=raise_error),
+    ]
+
+
+def _cache_process_exited(event, _context, *, cache_spec, pipeline):
+    from lr_future_path.cache import cache_is_valid
+
+    if event.returncode != 0:
+        return _stop_launch(
+            'Future-path cache process failed with return code '
+            f'{event.returncode}.'
+        )
+    if not cache_is_valid(cache_spec.path, cache_spec.identity):
+        return _stop_launch(
+            f'Future-path cache is invalid after preprocessing: '
+            f'{cache_spec.path}'
+        )
+    return [
+        LogInfo(msg=TextSubstitution(
+            text=(
+                f'Future-path cache ready: {cache_spec.path}; '
+                'starting SVO pipeline.'))),
+        *pipeline,
+    ]
+
+
+def _mavlink_process_exited(event, context):
+    if context.is_shutdown or event.returncode == 0:
+        return []
+    reason = (
+        'MAVLink pose node failed with return code '
+        f'{event.returncode}; stopping the SVO pipeline.'
+    )
+    return [
+        LogInfo(msg=TextSubstitution(text=f'ERROR: {reason}')),
+        EmitEvent(event=Shutdown(reason=reason)),
+    ]
+
+
+def _six_floats(value, name):
+    try:
+        parsed = ast.literal_eval(value)
+        result = [float(item) for item in parsed]
+    except (SyntaxError, ValueError, TypeError) as exception:
+        raise ValueError(
+            f'{name} must be a list of six finite numbers.'
+        ) from exception
+    if len(result) != 6 or not all(math.isfinite(item) for item in result):
+        raise ValueError(f'{name} must be a list of six finite numbers.')
+    return result
+
+
+def launch_setup(context, *args, **kwargs):
+    """Resolve options and construct immediate or cache-first actions."""
     # Launch configuration variables
     start_zed_node = LaunchConfiguration('start_zed_node')
     camera_name = LaunchConfiguration('camera_name')
@@ -48,12 +115,81 @@ def launch_setup(context, *args, **kwargs):
     start_segmentation_node = LaunchConfiguration('start_segmentation_node')
     segmentation_params_file = LaunchConfiguration('segmentation_params_file')
     segmentation_model_path = LaunchConfiguration('segmentation_model_path')
+    future_path = LaunchConfiguration('future_path')
+    future_path_cache_dir = LaunchConfiguration('future_path_cache_dir')
+    future_path_rebuild_cache = LaunchConfiguration(
+        'future_path_rebuild_cache')
+    future_path_topic = LaunchConfiguration('future_path_topic')
+    future_path_radius_m = LaunchConfiguration('future_path_radius_m')
+    future_path_step_m = LaunchConfiguration('future_path_step_m')
+    mavlink = LaunchConfiguration('mavlink')
+    mavlink_dir = LaunchConfiguration('mavlink_dir')
+    mavlink_db_path = LaunchConfiguration('mavlink_db_path')
+    mavlink_pose_topic = LaunchConfiguration('mavlink_pose_topic')
+    mavlink_match_tolerance_s = LaunchConfiguration(
+        'mavlink_match_tolerance_s')
+    mavlink_max_gps_gap_s = LaunchConfiguration(
+        'mavlink_max_gps_gap_s')
+    mavlink_body_to_camera = LaunchConfiguration(
+        'mavlink_body_to_camera')
 
     camera_name_val = camera_name.perform(context)
     camera_model_val = camera_model.perform(context)
     start_segmentation_val = start_segmentation_node.perform(context).lower()
-    segmentation_model_path_val = segmentation_model_path.perform(context).strip()
+    segmentation_model_path_val = (
+        segmentation_model_path.perform(context).strip()
+    )
     svo_mode_val = svo_path.perform(context) != 'live'
+    future_path_val = future_path.perform(context).lower() == 'true'
+    mavlink_val = mavlink.perform(context).lower() == 'true'
+
+    if mavlink_val and not svo_mode_val:
+        return _stop_launch(
+            'mavlink:=true requires an SVO file; live mode is unsupported.')
+    if (
+        mavlink_val
+        and publish_svo_clock.perform(context).lower() != 'true'
+    ):
+        return _stop_launch(
+            'mavlink:=true requires publish_svo_clock:=true.')
+
+    mavlink_match_tolerance_val = 60.0
+    mavlink_max_gps_gap_val = 1.5
+    mavlink_body_to_camera_val = [0.0] * 6
+    future_path_radius_val = 15.0
+    future_path_step_val = 0.2
+    if future_path_val:
+        try:
+            future_path_radius_val = float(
+                future_path_radius_m.perform(context))
+            future_path_step_val = float(
+                future_path_step_m.perform(context))
+            if (
+                future_path_radius_val <= 0.0
+                or future_path_step_val <= 0.0
+            ):
+                raise ValueError
+        except ValueError:
+            return _stop_launch(
+                'future_path_radius_m and future_path_step_m must be '
+                'positive.')
+    if mavlink_val:
+        try:
+            mavlink_match_tolerance_val = float(
+                mavlink_match_tolerance_s.perform(context))
+            mavlink_max_gps_gap_val = float(
+                mavlink_max_gps_gap_s.perform(context))
+            if (
+                mavlink_match_tolerance_val < 0.0
+                or mavlink_max_gps_gap_val <= 0.0
+            ):
+                raise ValueError
+            mavlink_body_to_camera_val = _six_floats(
+                mavlink_body_to_camera.perform(context),
+                'mavlink_body_to_camera',
+            )
+        except ValueError as exception:
+            return _stop_launch(f'Invalid MAVLink configuration: {exception}')
 
     # A model path is the complete signal that segmentation was requested.
     # Keep the explicit flag for compatibility, but let a non-empty path
@@ -125,9 +261,15 @@ def launch_setup(context, *args, **kwargs):
             'svo_path': svo_path,
             'param_overrides': [
                 TextSubstitution(text='svo.svo_realtime:='),
-                svo_realtime
+                svo_realtime,
+                TextSubstitution(text=(
+                    ';pos_tracking.pos_tracking_enabled:=false;'
+                    'depth.depth_stabilization:=0'
+                    if mavlink_val else '')),
             ],
             'publish_svo_clock': publish_svo_clock,
+            'publish_tf': 'false' if mavlink_val else 'true',
+            'publish_map_tf': 'false' if mavlink_val else 'true',
             # The ZED component is the /clock producer in SVO playback.  It
             # must not use simulated time itself: the wrapper waits for a
             # /clock message before grabbing, which would deadlock a clock
@@ -142,6 +284,37 @@ def launch_setup(context, *args, **kwargs):
         rviz2_node,
         zed_wrapper_launch
     ]
+    mavlink_exit_handler = None
+    if mavlink_val:
+        mavlink_node = Node(
+            package='lr_future_path',
+            executable='mavlink_pose_node',
+            name='mavlink_pose',
+            output='screen',
+            parameters=[{
+                'mavlink_dir': mavlink_dir.perform(context),
+                'mavlink_db_path': mavlink_db_path.perform(context),
+                'pose_topic': mavlink_pose_topic.perform(context),
+                'future_path_enabled': future_path_val,
+                'future_path_topic': future_path_topic.perform(context),
+                'map_frame': map_frame.perform(context),
+                'child_frame': f'{camera_name_val}_camera_link',
+                'match_tolerance_s': mavlink_match_tolerance_val,
+                'max_gps_gap_s': mavlink_max_gps_gap_val,
+                'body_to_camera': mavlink_body_to_camera_val,
+                'radius_m': future_path_radius_val,
+                'step_m': future_path_step_val,
+                'max_points': 1000,
+                'use_sim_time': True,
+            }],
+        )
+        nodes.insert(0, mavlink_node)
+        mavlink_exit_handler = RegisterEventHandler(
+            OnProcessExit(
+                target_action=mavlink_node,
+                on_exit=_mavlink_process_exited,
+            )
+        )
 
     if segmentation_warning is not None:
         nodes.insert(0, segmentation_warning)
@@ -183,7 +356,8 @@ def launch_setup(context, *args, **kwargs):
                     'use_sim_time': publish_svo_clock,
                 }
             ],
-            condition=IfCondition(TextSubstitution(text=start_segmentation_val))
+            condition=IfCondition(
+                TextSubstitution(text=start_segmentation_val))
         )
         nodes.append(segmentation_node)
 
@@ -210,14 +384,115 @@ def launch_setup(context, *args, **kwargs):
                     'use_sim_time': publish_svo_clock,
                 }
             ],
-            condition=IfCondition(TextSubstitution(text=start_segmentation_val))
+            condition=IfCondition(
+                TextSubstitution(text=start_segmentation_val))
         )
         nodes.append(box_estimator_node)
 
-    return nodes
+    if not future_path_val:
+        return (
+            [mavlink_exit_handler, *nodes]
+            if mavlink_exit_handler is not None
+            else nodes
+        )
+
+    if not svo_mode_val:
+        return _stop_launch(
+            'future_path:=true requires an SVO file; live mode is '
+            'unsupported.')
+
+    radius_m_val = future_path_radius_val
+    step_m_val = future_path_step_val
+
+    if mavlink_val:
+        cache_note = LogInfo(msg=TextSubstitution(text=(
+            'MAVLink supplies future ground truth directly; '
+            'skipping the SVO VIO cache pass.')))
+        return [mavlink_exit_handler, cache_note, *nodes]
+
+    from lr_future_path.cache import build_cache_spec, cache_is_valid
+
+    try:
+        cache_spec = build_cache_spec(
+            svo_path.perform(context),
+            camera_model_val,
+            future_path_cache_dir.perform(context),
+        )
+    except (FileNotFoundError, OSError, ValueError) as exception:
+        return _stop_launch(f'Cannot resolve future-path cache: {exception}')
+
+    future_node = Node(
+        package='lr_future_path',
+        executable='future_ground_truth_node',
+        name='future_ground_truth',
+        output='screen',
+        parameters=[{
+            'cache_path': str(cache_spec.path),
+            'input_pose_topic': f'/{camera_name_val}/zed_node/pose',
+            'output_topic': future_path_topic.perform(context),
+            'radius_m': radius_m_val,
+            'step_m': step_m_val,
+            'max_gap_s': 1.0,
+            'max_points': 1000,
+            'use_sim_time': publish_svo_clock,
+        }],
+    )
+    nodes.append(future_node)
+
+    rebuild_cache = (
+        future_path_rebuild_cache.perform(context).lower() == 'true')
+    if (
+        cache_is_valid(cache_spec.path, cache_spec.identity)
+        and not rebuild_cache
+    ):
+        return [
+            LogInfo(msg=TextSubstitution(
+                text=f'Future-path cache hit: {cache_spec.path}')),
+            *nodes,
+        ]
+
+    if start_zed_node.perform(context).lower() != 'true':
+        return _stop_launch(
+            'Future-path cache is missing, but start_zed_node is false. '
+            'Build the cache first or let this launch start ZED.')
+
+    cache_process = ExecuteProcess(
+        cmd=[
+            'ros2',
+            'launch',
+            'lr_future_path',
+            'build_svo_pose_cache.launch.py',
+            f'camera_name:={camera_name_val}',
+            f'camera_model:={camera_model_val}',
+            f'svo_path:={svo_path.perform(context)}',
+            f'cache_path:={cache_spec.path}',
+            'rebuild:=true' if rebuild_cache else 'rebuild:=false',
+        ],
+        output='screen',
+    )
+    cache_exit_handler = RegisterEventHandler(
+        OnProcessExit(
+            target_action=cache_process,
+            on_exit=lambda event, child_context: _cache_process_exited(
+                event,
+                child_context,
+                cache_spec=cache_spec,
+                pipeline=nodes,
+            ),
+        )
+    )
+    return [
+        cache_exit_handler,
+        LogInfo(msg=TextSubstitution(
+            text=(
+                f'Future-path cache miss: {cache_spec.path}; '
+                'running headless SVO preprocessing pass.'))),
+        cache_process,
+    ]
 
 
 def generate_launch_description():
+    """Declare display pipeline launch arguments."""
     return LaunchDescription(
         [
             DeclareLaunchArgument(
@@ -245,7 +520,9 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 'svo_path',
                 default_value=TextSubstitution(text='live'),
-                description='Path to an input SVO file. Keep `live` to use the camera.'),
+                description=(
+                    'Path to an input SVO file. Keep `live` to use the '
+                    'camera.')),
             DeclareLaunchArgument(
                 'svo_realtime',
                 default_value='true',
@@ -260,6 +537,77 @@ def generate_launch_description():
                     'If set to `true` the node will act as a clock server '
                     'publishing the SVO timestamp. This is useful for node '
                     'synchronization')),
+            DeclareLaunchArgument(
+                'future_path',
+                default_value='false',
+                description=(
+                    'Publish future ground-truth nav_msgs/Path from the '
+                    'MAVLink session or an SVO VIO cache.'),
+                choices=['true', 'false']),
+            DeclareLaunchArgument(
+                'future_path_cache_dir',
+                default_value='',
+                description=(
+                    'Cache root. Empty stores .lr_future_path_cache beside '
+                    'the SVO file.')),
+            DeclareLaunchArgument(
+                'future_path_rebuild_cache',
+                default_value='false',
+                description='Force a fresh headless SVO cache pass.',
+                choices=['true', 'false']),
+            DeclareLaunchArgument(
+                'future_path_topic',
+                default_value='/lr/future_path/ground_truth',
+                description='Output topic for nav_msgs/msg/Path.'),
+            DeclareLaunchArgument(
+                'future_path_radius_m',
+                default_value='15.0',
+                description='Maximum XY look-ahead radius in metres.'),
+            DeclareLaunchArgument(
+                'future_path_step_m',
+                default_value='0.2',
+                description='Spatial downsampling step in metres.'),
+            DeclareLaunchArgument(
+                'mavlink',
+                default_value='false',
+                description=(
+                    'Replace ZED dynamic localization TF with an offline '
+                    'MAVLink SQLite session.'),
+                choices=['true', 'false']),
+            DeclareLaunchArgument(
+                'mavlink_dir',
+                default_value='mavlink',
+                description=(
+                    'Directory recursively searched for session_mavlink.db; '
+                    'relative paths use the launch working directory.')),
+            DeclareLaunchArgument(
+                'mavlink_db_path',
+                default_value='',
+                description=(
+                    'Explicit session_mavlink.db path; bypasses directory '
+                    'discovery but is still validated.')),
+            DeclareLaunchArgument(
+                'mavlink_pose_topic',
+                default_value='/lr/mavlink/pose',
+                description='MAVLink-derived geometry_msgs/msg/PoseStamped.'),
+            DeclareLaunchArgument(
+                'mavlink_match_tolerance_s',
+                default_value='60.0',
+                description=(
+                    'Maximum difference between SVO and MAVLink session '
+                    'start times in seconds.')),
+            DeclareLaunchArgument(
+                'mavlink_max_gps_gap_s',
+                default_value='1.5',
+                description=(
+                    'Suppress MAVLink pose/TF/path when valid GPS samples '
+                    'are separated by a larger interval.')),
+            DeclareLaunchArgument(
+                'mavlink_body_to_camera',
+                default_value='[0,0,0,0,0,0]',
+                description=(
+                    'Camera mounting transform [x,y,z,roll,pitch,yaw] in '
+                    'ROS FLU metres/radians.')),
             DeclareLaunchArgument(
                 'start_terrain_node',
                 default_value='true',
@@ -284,7 +632,8 @@ def generate_launch_description():
                 default_value='auto',
                 description=(
                     'Start segmentation, disable explicitly with false; '
-                    'auto enables it when segmentation_model_path is provided.'),
+                    'auto enables it when segmentation_model_path is '
+                    'provided.'),
                 choices=['auto', 'true', 'false']),
             DeclareLaunchArgument(
                 'segmentation_params_file',
