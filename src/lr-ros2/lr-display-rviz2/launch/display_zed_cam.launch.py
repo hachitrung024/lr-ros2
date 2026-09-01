@@ -132,12 +132,19 @@ def launch_setup(context, *args, **kwargs):
         'mavlink_max_gps_gap_s')
     mavlink_body_to_camera = LaunchConfiguration(
         'mavlink_body_to_camera')
+    start_path_prediction_node = LaunchConfiguration(
+        'start_path_prediction_node')
+    prediction_params_file = LaunchConfiguration(
+        'prediction_params_file')
 
     camera_name_val = camera_name.perform(context)
     camera_model_val = camera_model.perform(context)
     start_segmentation_val = start_segmentation_node.perform(context).lower()
     segmentation_model_path_val = (
         segmentation_model_path.perform(context).strip()
+    )
+    start_prediction_val = (
+        start_path_prediction_node.perform(context).lower()
     )
     svo_mode_val = svo_path.perform(context) != 'live'
     future_path_val = future_path.perform(context).lower() == 'true'
@@ -204,6 +211,13 @@ def launch_setup(context, *args, **kwargs):
                     'No segmentation_model_path was provided; '
                     'disabling start_segmentation_node.')))
         start_segmentation_val = 'false'
+
+    if start_prediction_val == 'auto':
+        start_prediction_val = str(
+            future_path_val
+            and start_terrain_node.perform(context).lower() == 'true'
+            and start_segmentation_val == 'true'
+        ).lower()
 
     if (camera_name_val == ''):
         camera_name_val = 'zed'
@@ -388,6 +402,26 @@ def launch_setup(context, *args, **kwargs):
                 TextSubstitution(text=start_segmentation_val))
         )
         nodes.append(box_estimator_node)
+
+        path_prediction_node = Node(
+            package='lr_path_prediction',
+            executable='path_risk_predictor_node',
+            name='path_risk_predictor',
+            output='screen',
+            parameters=[
+                prediction_params_file,
+                {
+                    'input.path_topic': future_path_topic,
+                    'input.terrain_topic': '/terrain_geometry/grid_map',
+                    'input.objects_topic': '/segmentation/boxes_3d',
+                    'frames.map_frame': map_frame,
+                    'use_sim_time': publish_svo_clock,
+                }
+            ],
+            condition=IfCondition(
+                TextSubstitution(text=start_prediction_val))
+        )
+        nodes.append(path_prediction_node)
 
     if not future_path_val:
         return (
@@ -648,6 +682,22 @@ def generate_launch_description():
                 default_value='',
                 description=(
                     'External Ultralytics instance-segmentation checkpoint.')),
+            DeclareLaunchArgument(
+                'start_path_prediction_node',
+                default_value='auto',
+                description=(
+                    'Start 20-step terrain/object prediction. Auto enables '
+                    'it when future path, terrain, and segmentation are '
+                    'enabled.'),
+                choices=['auto', 'true', 'false']),
+            DeclareLaunchArgument(
+                'prediction_params_file',
+                default_value=os.path.join(
+                    get_package_share_directory('lr_path_prediction'),
+                    'config',
+                    'path_prediction.yaml'
+                ),
+                description='Path-prediction ROS parameter file.'),
             OpaqueFunction(function=launch_setup)
         ]
     )

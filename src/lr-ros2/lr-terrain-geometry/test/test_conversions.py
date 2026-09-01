@@ -164,10 +164,15 @@ def test_grid_map_layers_storage_and_accepted_state_precedence():
     elevation = np.asarray(message.data[elevation_index].data).reshape(
         (3, 3), order="F"
     )
+    normal_z_index = message.layers.index("normal_z")
+    normal_z = np.asarray(message.data[normal_z_index].data).reshape(
+        (3, 3), order="F"
+    )
     # center key is (0, -1); matrix indices run from positive to negative map
     # coordinates to match grid_map's Eigen storage convention.
     assert state[1, 1] == 1.0
     assert elevation[1, 1] == np.float32(0.2)
+    assert normal_z[1, 1] == 1.0
     assert state[0, 1] == 0.0
     assert message.data[0].layout.dim[0].label == "column_index"
     assert message.data[0].layout.dim[1].label == "row_index"

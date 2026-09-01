@@ -65,6 +65,8 @@ def _context(**overrides):
         "start_segmentation_node": "false",
         "segmentation_params_file": "/tmp/segmentation.yaml",
         "segmentation_model_path": "",
+        "start_path_prediction_node": "auto",
+        "prediction_params_file": "/tmp/path_prediction.yaml",
     }
     values.update(overrides)
     context = LaunchContext()
@@ -128,6 +130,21 @@ def test_mavlink_true_disables_zed_tracking_and_owns_future_path():
     overrides = _substitution_text(context, arguments["param_overrides"])
     assert "pos_tracking.pos_tracking_enabled:=false" in overrides
     assert "depth.depth_stabilization:=0" in overrides
+
+
+def test_prediction_auto_starts_with_all_three_inputs():
+    """Auto mode starts prediction when path, terrain, and boxes are on."""
+    module = _load_launch_module()
+    context = _context(
+        future_path="true",
+        mavlink="true",
+        start_terrain_node="true",
+        segmentation_model_path="/tmp/best.pt",
+    )
+
+    actions = module.launch_setup(context)
+
+    assert "path_risk_predictor_node" in _node_executables(actions)
 
 
 def test_mavlink_live_and_missing_svo_clock_are_rejected():

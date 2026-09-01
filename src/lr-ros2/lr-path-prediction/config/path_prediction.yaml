@@ -1,0 +1,21 @@
+path_risk_predictor:
+  ros__parameters:
+    input.path_topic: /lr/future_path/ground_truth
+    input.terrain_topic: /terrain_geometry/grid_map
+    input.objects_topic: /segmentation/boxes_3d
+    output.steps_topic: /lr/path_prediction/steps
+    output.markers_topic: /lr/path_prediction/markers
+    frames.map_frame: map
+
+    prediction.step_count: 20
+    prediction.path_stride: 1
+    warning.slope_deg: 20.0
+    critical.slope_deg: 30.0
+    collision.rover_radius_m: 0.55
+    collision.margin_m: 0.15
+
+    synchronization.max_terrain_age_sec: 2.0
+    synchronization.max_objects_age_sec: 1.0
+    visualization.normal_length_m: 0.8
+    visualization.marker_z_offset_m: 0.10
+    visualization.label_height_m: 0.45

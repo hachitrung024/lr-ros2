@@ -20,6 +20,9 @@ from .estimator import TerrainGeometryConfig, TerrainResult
 GRID_MAP_LAYERS = (
     "elevation",
     "slope_deg",
+    "normal_x",
+    "normal_y",
+    "normal_z",
     "rmse_m",
     "inlier_ratio",
     "state",
@@ -193,6 +196,10 @@ def terrain_result_to_grid_map(
         slope = float(plane["slope_deg"])
         layers["elevation"][location] = elevation
         layers["slope_deg"][location] = slope
+        normal = np.asarray(plane["normal_world"], dtype=np.float32)
+        layers["normal_x"][location] = float(normal[0])
+        layers["normal_y"][location] = float(normal[1])
+        layers["normal_z"][location] = float(normal[2])
         layers["rmse_m"][location] = float(plane["rmse"])
         layers["inlier_ratio"][location] = float(plane["inlier_ratio"])
         layers["state"][location] = 1.0

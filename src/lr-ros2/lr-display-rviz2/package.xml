@@ -31,6 +31,7 @@
     <exec_depend>lr_terrain_geometry</exec_depend>
     <exec_depend>lr_segmentation</exec_depend>
     <exec_depend>lr_future_path</exec_depend>
+    <exec_depend>lr_path_prediction</exec_depend>
 
     <test_depend>ament_lint_auto</test_depend>
     <test_depend>ament_lint_common</test_depend>

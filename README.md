@@ -37,6 +37,7 @@ colcon build --symlink-install \
   lr_future_path \
   lr_segmentation \
   lr_terrain_geometry \
+  lr_path_prediction \
   lr_display_rviz2
 source install/setup.bash
 ```
@@ -94,7 +95,18 @@ not with a live camera.
 /terrain_geometry/grid_map
 /terrain_geometry/markers
 /terrain_geometry/heatmap
+/lr/path_prediction/steps
+/lr/path_prediction/markers
 ```
+
+When `future_path:=true`, terrain, and segmentation are enabled, the launch
+also starts `path_risk_predictor`. It evaluates the next 20 path poses (the
+current pose is excluded), reports slope and static-object collision status on
+`/lr/path_prediction/steps`, and visualizes step points, compact slope labels,
+`!` collision marks, and terrain normal vectors on
+`/lr/path_prediction/markers`. Normal steps are gray; slope warnings and object
+collisions use warning colors. Thresholds and rover footprint dimensions are
+configurable in `path_prediction.yaml`.
 
 MAVLink publishes the `map -> zed_camera_link` TF when
 `camera_name:=zed`. If exactly one MAVLink session matching the SVO timestamp
