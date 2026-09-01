@@ -9,11 +9,11 @@ ground-truth path, and starts segmentation, terrain geometry, and RViz:
 ```bash
 ros2 launch lr_display_rviz2 display_zed_cam.launch.py \
   camera_model:=zed2i \
-  svo_path:=/path/to/recording.svo2 \
   publish_svo_clock:=true \
   segmentation_model_path:=/path/to/best.pt \
+  mavlink:=true \
   future_path:=true \
-  mavlink:=true
+  svo_path:=/path/to/recording.svo2
 ```
 
 By default, `mavlink_db_path` is empty and the launch file recursively searches
@@ -100,13 +100,32 @@ not with a live camera.
 ```
 
 When `future_path:=true`, terrain, and segmentation are enabled, the launch
-also starts `path_risk_predictor`. It evaluates the next 20 path poses (the
-current pose is excluded), reports slope and static-object collision status on
-`/lr/path_prediction/steps`, and visualizes step points, compact slope labels,
-`!` collision marks, and terrain normal vectors on
-`/lr/path_prediction/markers`. Normal steps are gray; slope warnings and object
-collisions use warning colors. Thresholds and rover footprint dimensions are
-configurable in `path_prediction.yaml`.
+also starts one self-contained `path_risk_predictor` node. It evaluates the
+next 20 path poses (the current pose is excluded), uses the configured oriented
+rectangular rover footprint for object clearance/collision, and computes
+terrain roll, pitch, and static stability margin wherever a terrain normal is
+available. It has no runtime or build dependency on the `prediction-rover/`
+reference repository.
+
+`/lr/path_prediction/steps` adds slope, normal, collision IDs, roll/pitch, and
+stability evidence. `/lr/path_prediction/markers` shows all 20 path points,
+compact slope labels, `!` collision marks, and terrain-normal arrows. Steps
+without valid terrain stay gray and have no slope label. Colors change to
+orange/red for slope warnings and magenta for a footprint collision.
+
+The rover values in `lr_path_prediction/config/path_prediction.yaml` are
+estimates only. Replace them with measured mass, body/support dimensions, and
+center-of-mass values before field use. A different parameter file can be used
+with:
+
+```bash
+prediction_params_file:=/path/to/path_prediction.yaml
+```
+
+The default `prediction_profile:=static` does not require velocity. Optional
+`prediction_profile:=dynamic` makes the same node estimate map-frame kinematic
+acceleration directly from `/lr/mavlink/pose` and adds effective stability
+margin evidence. No state adapter is required.
 
 MAVLink publishes the `map -> zed_camera_link` TF when
 `camera_name:=zed`. If exactly one MAVLink session matching the SVO timestamp

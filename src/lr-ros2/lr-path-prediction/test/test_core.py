@@ -1,6 +1,7 @@
 import math
 
 import numpy as np
+import pytest
 from geometry_msgs.msg import PoseStamped
 from grid_map_msgs.msg import GridMap
 from nav_msgs.msg import Path
@@ -9,9 +10,11 @@ from vision_msgs.msg import Detection3D, Detection3DArray
 
 from lr_path_prediction.core import (
     GridMapSampler,
+    RoverModel,
     obstacles_from_message,
     predict_steps,
 )
+from lr_path_prediction.node import PoseAccelerationEstimator
 
 
 def _layer(values):
@@ -115,8 +118,7 @@ def test_prediction_uses_exactly_20_future_poses_and_excludes_current():
         object_data_available=True,
         step_count=20,
         path_stride=1,
-        rover_radius_m=0.5,
-        collision_margin_m=0.1,
+        rover=RoverModel(),
     )
 
     assert len(predictions) == 20
@@ -126,7 +128,7 @@ def test_prediction_uses_exactly_20_future_poses_and_excludes_current():
     assert predictions[-1].time_from_start_sec == 2.0
 
 
-def test_oriented_box_collision_includes_rover_radius_and_margin():
+def test_oriented_box_collision_uses_body_footprint_and_margin():
     detections = Detection3DArray()
     detection = Detection3D()
     detection.id = "rock-7"
@@ -144,8 +146,7 @@ def test_oriented_box_collision_includes_rover_radius_and_margin():
         object_data_available=True,
         step_count=3,
         path_stride=1,
-        rover_radius_m=0.4,
-        collision_margin_m=0.1,
+        rover=RoverModel(collision_margin_m=0.1),
     )
 
     assert predictions[0].object_collision
@@ -162,10 +163,41 @@ def test_missing_object_message_is_unknown_not_clear():
         object_data_available=False,
         step_count=1,
         path_stride=1,
-        rover_radius_m=0.5,
-        collision_margin_m=0.1,
+        rover=RoverModel(),
     )[0]
 
     assert not prediction.object_data_available
     assert not prediction.object_collision
     assert math.isinf(prediction.nearest_object_clearance_m)
+
+
+def test_rollover_evidence_uses_terrain_normal_and_rover_support():
+    path = _path(count=2)
+    path.poses[1].pose.position.x = 0.0
+    prediction = predict_steps(
+        path,
+        terrain=GridMapSampler(_terrain_grid(slope=25.0)),
+        obstacles=[],
+        object_data_available=True,
+        step_count=1,
+        path_stride=1,
+        rover=RoverModel(),
+    )[0]
+
+    assert prediction.predicted_roll_deg == pytest.approx(-25.0, abs=1e-5)
+    assert prediction.predicted_pitch_deg == pytest.approx(0.0, abs=1e-5)
+    assert prediction.static_stability_margin_m < 0.44
+    assert 0.0 < prediction.normalized_static_stability_margin < 1.0
+    assert prediction.nearest_static_edge == "left"
+
+
+def test_pose_estimator_derives_acceleration_inside_prediction_node():
+    estimator = PoseAccelerationEstimator()
+    for second, x_value in ((1, 0.5), (2, 2.0), (3, 4.5)):
+        pose = PoseStamped()
+        pose.header.stamp.sec = second
+        pose.pose.position.x = x_value
+        estimator.add(pose)
+
+    assert estimator.acceleration == pytest.approx((1.0, 0.0, 0.0))
+    assert estimator.stamp_ns == 3_000_000_000

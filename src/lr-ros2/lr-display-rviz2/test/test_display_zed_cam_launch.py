@@ -67,6 +67,7 @@ def _context(**overrides):
         "segmentation_model_path": "",
         "start_path_prediction_node": "auto",
         "prediction_params_file": "/tmp/path_prediction.yaml",
+        "prediction_profile": "static",
     }
     values.update(overrides)
     context = LaunchContext()
@@ -144,7 +145,31 @@ def test_prediction_auto_starts_with_all_three_inputs():
 
     actions = module.launch_setup(context)
 
-    assert "path_risk_predictor_node" in _node_executables(actions)
+    executables = _node_executables(actions)
+    assert executables.count("path_risk_predictor_node") == 1
+    assert "trajectory_adapter_node" not in executables
+    assert "geometry_adapter_node" not in executables
+    assert "tracked_objects_adapter_node" not in executables
+    assert "prediction_node" not in executables
+    assert "canonical_prediction_visualizer_node" not in executables
+
+
+def test_dynamic_prediction_remains_one_integrated_node():
+    """Dynamic mode derives acceleration inside the prediction node."""
+    module = _load_launch_module()
+    context = _context(
+        future_path="true",
+        mavlink="true",
+        start_terrain_node="true",
+        segmentation_model_path="/tmp/best.pt",
+        prediction_profile="dynamic",
+    )
+
+    actions = module.launch_setup(context)
+
+    executables = _node_executables(actions)
+    assert executables.count("path_risk_predictor_node") == 1
+    assert "rover_state_adapter_node" not in executables
 
 
 def test_mavlink_live_and_missing_svo_clock_are_rejected():

@@ -136,6 +136,7 @@ def launch_setup(context, *args, **kwargs):
         'start_path_prediction_node')
     prediction_params_file = LaunchConfiguration(
         'prediction_params_file')
+    prediction_profile = LaunchConfiguration('prediction_profile')
 
     camera_name_val = camera_name.perform(context)
     camera_model_val = camera_model.perform(context)
@@ -146,6 +147,7 @@ def launch_setup(context, *args, **kwargs):
     start_prediction_val = (
         start_path_prediction_node.perform(context).lower()
     )
+    prediction_profile_val = prediction_profile.perform(context).lower()
     svo_mode_val = svo_path.perform(context) != 'live'
     future_path_val = future_path.perform(context).lower() == 'true'
     mavlink_val = mavlink.perform(context).lower() == 'true'
@@ -218,6 +220,14 @@ def launch_setup(context, *args, **kwargs):
             and start_terrain_node.perform(context).lower() == 'true'
             and start_segmentation_val == 'true'
         ).lower()
+    if (
+        start_prediction_val == 'true'
+        and prediction_profile_val == 'dynamic'
+        and not mavlink_val
+    ):
+        return _stop_launch(
+            'prediction_profile:=dynamic requires mavlink:=true so '
+            '/lr/mavlink/pose can provide rover acceleration.')
 
     if (camera_name_val == ''):
         camera_name_val = 'zed'
@@ -403,7 +413,9 @@ def launch_setup(context, *args, **kwargs):
         )
         nodes.append(box_estimator_node)
 
-        path_prediction_node = Node(
+        prediction_condition = IfCondition(
+            TextSubstitution(text=start_prediction_val))
+        prediction_node = Node(
             package='lr_path_prediction',
             executable='path_risk_predictor_node',
             name='path_risk_predictor',
@@ -414,14 +426,15 @@ def launch_setup(context, *args, **kwargs):
                     'input.path_topic': future_path_topic,
                     'input.terrain_topic': '/terrain_geometry/grid_map',
                     'input.objects_topic': '/segmentation/boxes_3d',
+                    'input.pose_topic': mavlink_pose_topic,
                     'frames.map_frame': map_frame,
+                    'prediction.profile': prediction_profile,
                     'use_sim_time': publish_svo_clock,
                 }
             ],
-            condition=IfCondition(
-                TextSubstitution(text=start_prediction_val))
+            condition=prediction_condition,
         )
-        nodes.append(path_prediction_node)
+        nodes.append(prediction_node)
 
     if not future_path_val:
         return (
@@ -697,7 +710,14 @@ def generate_launch_description():
                     'config',
                     'path_prediction.yaml'
                 ),
-                description='Path-prediction ROS parameter file.'),
+                description='Prediction visualization parameter file.'),
+            DeclareLaunchArgument(
+                'prediction_profile',
+                default_value='static',
+                description=(
+                    'Prediction profile. Dynamic additionally estimates '
+                    'acceleration directly from MAVLink pose.'),
+                choices=['static', 'dynamic']),
             OpaqueFunction(function=launch_setup)
         ]
     )

@@ -1,4 +1,4 @@
-"""Launch path risk prediction against already-running input nodes."""
+"""Launch the self-contained LR path-prediction node."""
 
 import os
 
@@ -18,19 +18,24 @@ def generate_launch_description():
     )
     return LaunchDescription([
         DeclareLaunchArgument(
-            "prediction_params_file",
-            default_value=default_config,
-        ),
-        DeclareLaunchArgument("path_topic", default_value=(
-            "/lr/future_path/ground_truth"
-        )),
-        DeclareLaunchArgument(
-            "terrain_topic",
-            default_value="/terrain_geometry/grid_map",
+            "prediction_params_file", default_value=default_config
         ),
         DeclareLaunchArgument(
-            "objects_topic",
-            default_value="/segmentation/boxes_3d",
+            "prediction_profile",
+            default_value="static",
+            choices=["static", "dynamic"],
+        ),
+        DeclareLaunchArgument(
+            "path_topic", default_value="/lr/future_path/ground_truth"
+        ),
+        DeclareLaunchArgument(
+            "terrain_topic", default_value="/terrain_geometry/grid_map"
+        ),
+        DeclareLaunchArgument(
+            "objects_topic", default_value="/segmentation/boxes_3d"
+        ),
+        DeclareLaunchArgument(
+            "pose_topic", default_value="/lr/mavlink/pose"
         ),
         DeclareLaunchArgument("map_frame", default_value="map"),
         DeclareLaunchArgument("use_sim_time", default_value="false"),
@@ -38,7 +43,6 @@ def generate_launch_description():
             package="lr_path_prediction",
             executable="path_risk_predictor_node",
             name="path_risk_predictor",
-            output="screen",
             parameters=[
                 LaunchConfiguration("prediction_params_file"),
                 {
@@ -49,9 +53,14 @@ def generate_launch_description():
                     "input.objects_topic": LaunchConfiguration(
                         "objects_topic"
                     ),
+                    "input.pose_topic": LaunchConfiguration("pose_topic"),
                     "frames.map_frame": LaunchConfiguration("map_frame"),
+                    "prediction.profile": LaunchConfiguration(
+                        "prediction_profile"
+                    ),
                     "use_sim_time": LaunchConfiguration("use_sim_time"),
                 },
             ],
+            output="screen",
         ),
     ])

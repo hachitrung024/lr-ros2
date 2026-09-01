@@ -1,33 +1,40 @@
 # LR Path Prediction
 
-`path_risk_predictor` evaluates the first 20 future poses from a
-`nav_msgs/Path`. For every step it samples terrain slope and normal from a
-`grid_map_msgs/GridMap`, then checks the rover's circular XY footprint against
-the current `vision_msgs/Detection3DArray` boxes. Objects are assumed static
-over the prediction horizon.
+`lr_path_prediction` is a self-contained ROS 2 prediction node integrated into
+the LR perception pipeline. The `prediction-rover/` repository was used only
+as an algorithm reference and may be removed without affecting this package.
+
+The node evaluates up to 20 future path poses using:
+
+- exact oriented rover-body and object-box footprint distance;
+- collision candidates within the configured safety margin;
+- terrain slope and normal;
+- terrain-relative roll and pitch;
+- static stability margin from the support polygon and center of mass;
+- optional effective stability margin from current kinematic acceleration.
+
+Objects are treated as static because the current segmentation output has no
+tracked velocity.
 
 ## Inputs
 
 - `/lr/future_path/ground_truth` (`nav_msgs/msg/Path`)
 - `/terrain_geometry/grid_map` (`grid_map_msgs/msg/GridMap`)
 - `/segmentation/boxes_3d` (`vision_msgs/msg/Detection3DArray`)
+- `/lr/mavlink/pose` (`geometry_msgs/msg/PoseStamped`), dynamic profile only
 
-The inputs must use the configured `map` frame. A recent empty detection array
-means that no object was detected; missing or stale detection data is reported
-as unknown.
+All inputs must use the configured `map` frame. A recent empty detection array
+means no object was detected; missing or stale data is reported as unknown.
 
 ## Outputs
 
-- `/lr/path_prediction/steps` (`diagnostic_msgs/msg/DiagnosticArray`) contains
-  one status per step, including pose, distance/time offset, slope, normal,
-  object IDs, collision state, and nearest object clearance.
-- `/lr/path_prediction/markers` (`visualization_msgs/msg/MarkerArray`) contains
-  colored path points, compact slope labels, collision marks, and normal
-  arrows. A label contains only the slope when available and adds `!` when the
-  rover footprint intersects a 3D-box footprint.
+- `/lr/path_prediction/steps` (`diagnostic_msgs/msg/DiagnosticArray`) publishes
+  one status per step with pose, terrain, collision, and stability evidence.
+- `/lr/path_prediction/markers` (`visualization_msgs/msg/MarkerArray`) publishes
+  the 20 points, slope labels, `!` collision marks, and normal arrows for RViz.
 
-Colors are gray by default, orange for slope warning, red for critical slope,
-and magenta for object collision.
+Points are gray by default, orange/red for slope warnings, and magenta for
+object collisions. Labels contain only the slope and append `!` on collision.
 
 ## Standalone launch
 
@@ -36,7 +43,12 @@ ros2 launch lr_path_prediction path_prediction.launch.py \
   use_sim_time:=true
 ```
 
-The main `display_zed_cam.launch.py` starts this node automatically when the
-future path, terrain, and segmentation are all enabled. Parameters such as the
-20-step count, path stride, slope thresholds, rover radius, collision margin,
-and input age limits are in `config/path_prediction.yaml`.
+The main `display_zed_cam.launch.py` starts this node automatically when future
+path, terrain, and segmentation are enabled. All rover geometry, CoM, collision
+margin, warning, and visualization settings are in
+`config/path_prediction.yaml`. The bundled rover values are references only and
+must be replaced with measured/CAD values before field use.
+
+The default `prediction_profile:=static` needs no robot state. The optional
+`dynamic` profile estimates acceleration inside this same node from stamped
+MAVLink poses; it does not start an adapter or another prediction engine.

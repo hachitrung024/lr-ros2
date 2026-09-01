@@ -32,6 +32,58 @@ class Obstacle:
 
 
 @dataclass(frozen=True)
+class RoverModel:
+    """Physical geometry used by collision and rollover prediction."""
+
+    mass_kg: float = 100.0
+    body_length_m: float = 1.05
+    body_width_m: float = 0.90
+    support_length_m: float = 0.75
+    support_width_m: float = 0.88
+    com_x_m: float = 0.0
+    com_y_m: float = 0.0
+    com_height_m: float = 0.33
+    collision_margin_m: float = 0.20
+
+    def validate(self) -> None:
+        """Reject non-physical values before prediction starts."""
+        values = (
+            self.mass_kg,
+            self.body_length_m,
+            self.body_width_m,
+            self.support_length_m,
+            self.support_width_m,
+            self.com_x_m,
+            self.com_y_m,
+            self.com_height_m,
+            self.collision_margin_m,
+        )
+        if not all(math.isfinite(value) for value in values):
+            raise ValueError("all rover model values must be finite")
+        if any(
+            value <= 0.0
+            for value in (
+                self.mass_kg,
+                self.body_length_m,
+                self.body_width_m,
+                self.support_length_m,
+                self.support_width_m,
+                self.com_height_m,
+            )
+        ):
+            raise ValueError(
+                "rover mass, dimensions, and CoM height must be positive"
+            )
+        if self.collision_margin_m < 0.0:
+            raise ValueError("collision margin must not be negative")
+        if (
+            abs(self.com_x_m) >= self.support_length_m * 0.5
+            or abs(self.com_y_m) >= self.support_width_m * 0.5
+        ):
+            raise ValueError("configured CoM must be inside the support rectangle")
+
+
+@dataclass(frozen=True)
 class StepPrediction:
     """Predicted terrain and collision state at one future path pose."""
 
@@ -45,6 +97,16 @@ class StepPrediction:
     object_collision: bool
     object_ids: tuple[str, ...]
     nearest_object_clearance_m: float
+    rover_yaw_rad: float = math.nan
+    predicted_roll_deg: float = math.nan
+    predicted_pitch_deg: float = math.nan
+    static_stability_margin_m: float = math.nan
+    normalized_static_stability_margin: float = math.nan
+    nearest_static_edge: str = ""
+    dynamic_state_available: bool = False
+    effective_stability_margin_m: float = math.nan
+    normalized_effective_stability_margin: float = math.nan
+    nearest_effective_edge: str = ""
 
 
 class GridMapSampler:
@@ -219,14 +281,17 @@ def predict_steps(
     object_data_available: bool,
     step_count: int,
     path_stride: int,
-    rover_radius_m: float,
-    collision_margin_m: float,
+    rover: RoverModel,
+    acceleration_world_xyz: tuple[float, float, float] | None = None,
 ) -> list[StepPrediction]:
-    """Evaluate terrain and static-object collision at future path poses."""
+    """Evaluate collision and rollover evidence at future path poses."""
     if step_count < 1 or path_stride < 1:
         raise ValueError("step_count and path_stride must be positive")
-    if rover_radius_m < 0.0 or collision_margin_m < 0.0:
-        raise ValueError("collision dimensions must not be negative")
+    rover.validate()
+    if acceleration_world_xyz is not None:
+        acceleration = np.asarray(acceleration_world_xyz, dtype=np.float64)
+        if acceleration.shape != (3,) or not np.isfinite(acceleration).all():
+            raise ValueError("acceleration must contain three finite values")
     if len(path.poses) < 2:
         return []
 
@@ -236,11 +301,11 @@ def predict_steps(
     cumulative_distances = _path_distances(path)
     initial_stamp_ns = _pose_stamp_ns(path, 0)
     predictions = []
-    collision_radius = float(rover_radius_m + collision_margin_m)
     for step_index, source_index in enumerate(source_indices, start=1):
         pose = path.poses[source_index]
         position = pose.pose.position
         xyz = (float(position.x), float(position.y), float(position.z))
+        yaw = _path_pose_yaw(path, source_index)
         terrain_sample = (
             terrain.sample(xyz[0], xyz[1])
             if terrain is not None
@@ -250,15 +315,31 @@ def predict_steps(
         nearest_clearance = math.inf
         if object_data_available:
             for obstacle in obstacles:
-                clearance = _obstacle_clearance(
-                    xyz[0],
-                    xyz[1],
-                    obstacle,
-                    collision_radius,
+                clearance = _rectangle_distance(
+                    _rectangle_vertices(
+                        xyz[0],
+                        xyz[1],
+                        rover.body_length_m,
+                        rover.body_width_m,
+                        yaw,
+                    ),
+                    _rectangle_vertices(
+                        obstacle.center_xy[0],
+                        obstacle.center_xy[1],
+                        obstacle.size_xy[0],
+                        obstacle.size_xy[1],
+                        obstacle.yaw_rad,
+                    ),
                 )
                 nearest_clearance = min(nearest_clearance, clearance)
-                if clearance <= 0.0:
+                if clearance <= rover.collision_margin_m + 1e-9:
                     collision_ids.append(obstacle.object_id)
+        rollover = _rollover_evidence(
+            terrain_sample,
+            yaw,
+            rover,
+            acceleration_world_xyz,
+        )
         target_stamp_ns = _pose_stamp_ns(path, source_index)
         time_from_start = math.nan
         if initial_stamp_ns > 0 and target_stamp_ns >= initial_stamp_ns:
@@ -274,6 +355,16 @@ def predict_steps(
             object_collision=bool(collision_ids),
             object_ids=tuple(collision_ids),
             nearest_object_clearance_m=nearest_clearance,
+            rover_yaw_rad=yaw,
+            predicted_roll_deg=rollover[0],
+            predicted_pitch_deg=rollover[1],
+            static_stability_margin_m=rollover[2],
+            normalized_static_stability_margin=rollover[3],
+            nearest_static_edge=rollover[4],
+            dynamic_state_available=acceleration_world_xyz is not None,
+            effective_stability_margin_m=rollover[5],
+            normalized_effective_stability_margin=rollover[6],
+            nearest_effective_edge=rollover[7],
         ))
     return predictions
 
@@ -299,21 +390,266 @@ def _pose_stamp_ns(path: Path, index: int) -> int:
     return value
 
 
-def _obstacle_clearance(
-    x_m: float,
-    y_m: float,
-    obstacle: Obstacle,
-    rover_radius_m: float,
+def _path_pose_yaw(path: Path, index: int) -> float:
+    orientation = path.poses[index].pose.orientation
+    try:
+        return _quaternion_yaw(
+            orientation.x,
+            orientation.y,
+            orientation.z,
+            orientation.w,
+        )
+    except ValueError:
+        previous_index = max(0, index - 1)
+        next_index = min(len(path.poses) - 1, index + 1)
+        previous = path.poses[previous_index].pose.position
+        following = path.poses[next_index].pose.position
+        delta_x = float(following.x - previous.x)
+        delta_y = float(following.y - previous.y)
+        if math.hypot(delta_x, delta_y) <= 1e-9:
+            return 0.0
+        return math.atan2(delta_y, delta_x)
+
+
+def _rectangle_vertices(
+    center_x: float,
+    center_y: float,
+    length_m: float,
+    width_m: float,
+    yaw_rad: float,
+) -> np.ndarray:
+    half_length = length_m * 0.5
+    half_width = width_m * 0.5
+    local = np.asarray([
+        [half_length, half_width],
+        [-half_length, half_width],
+        [-half_length, -half_width],
+        [half_length, -half_width],
+    ], dtype=np.float64)
+    cosine = math.cos(yaw_rad)
+    sine = math.sin(yaw_rad)
+    rotation = np.asarray([[cosine, -sine], [sine, cosine]])
+    return local @ rotation.T + np.asarray([center_x, center_y])
+
+
+def _rectangle_distance(first: np.ndarray, second: np.ndarray) -> float:
+    if _rectangles_intersect(first, second):
+        return 0.0
+    distance = math.inf
+    for point in first:
+        for index in range(4):
+            distance = min(
+                distance,
+                _point_segment_distance(
+                    point,
+                    second[index],
+                    second[(index + 1) % 4],
+                ),
+            )
+    for point in second:
+        for index in range(4):
+            distance = min(
+                distance,
+                _point_segment_distance(
+                    point,
+                    first[index],
+                    first[(index + 1) % 4],
+                ),
+            )
+    return float(distance)
+
+
+def _rectangles_intersect(first: np.ndarray, second: np.ndarray) -> bool:
+    for polygon in (first, second):
+        for index in range(2):
+            edge = polygon[(index + 1) % 4] - polygon[index]
+            axis = np.asarray([-edge[1], edge[0]], dtype=np.float64)
+            first_projection = first @ axis
+            second_projection = second @ axis
+            if (
+                float(np.max(first_projection))
+                < float(np.min(second_projection)) - 1e-12
+                or float(np.max(second_projection))
+                < float(np.min(first_projection)) - 1e-12
+            ):
+                return False
+    return True
+
+
+def _point_segment_distance(
+    point: np.ndarray,
+    start: np.ndarray,
+    end: np.ndarray,
 ) -> float:
-    delta_x = float(x_m) - obstacle.center_xy[0]
-    delta_y = float(y_m) - obstacle.center_xy[1]
-    cosine = math.cos(obstacle.yaw_rad)
-    sine = math.sin(obstacle.yaw_rad)
-    local_x = cosine * delta_x + sine * delta_y
-    local_y = -sine * delta_x + cosine * delta_y
-    outside_x = max(abs(local_x) - obstacle.size_xy[0] * 0.5, 0.0)
-    outside_y = max(abs(local_y) - obstacle.size_xy[1] * 0.5, 0.0)
-    return math.hypot(outside_x, outside_y) - rover_radius_m
+    segment = end - start
+    length_squared = float(segment @ segment)
+    if length_squared <= 1e-18:
+        return float(np.linalg.norm(point - start))
+    fraction = float((point - start) @ segment) / length_squared
+    fraction = min(1.0, max(0.0, fraction))
+    projection = start + fraction * segment
+    return float(np.linalg.norm(point - projection))
+
+
+def _rollover_evidence(
+    terrain: TerrainSample,
+    yaw: float,
+    rover: RoverModel,
+    acceleration_world_xyz: tuple[float, float, float] | None,
+) -> tuple[float, float, float, float, str, float, float, str]:
+    unavailable = (math.nan, math.nan, math.nan, math.nan, "")
+    if not terrain.valid or terrain.normal_xyz is None:
+        return (*unavailable, math.nan, math.nan, "")
+    try:
+        normal = _normalized_upward_normal(terrain.normal_xyz)
+    except ValueError:
+        return (*unavailable, math.nan, math.nan, "")
+    forward = np.asarray([math.cos(yaw), math.sin(yaw), 0.0])
+    left = np.asarray([-math.sin(yaw), math.cos(yaw), 0.0])
+    pitch = math.atan2(-float(normal @ forward), float(normal[2]))
+    roll = math.atan2(-float(normal @ left), float(normal[2]))
+    reference = _support_margins(
+        (rover.com_x_m, rover.com_y_m),
+        rover.support_length_m,
+        rover.support_width_m,
+    )
+    try:
+        projected = _project_com(
+            normal,
+            yaw,
+            rover,
+            np.asarray([0.0, 0.0, -9.80665]),
+        )
+    except ValueError:
+        return (*unavailable, math.nan, math.nan, "")
+    current = _support_margins(
+        projected,
+        rover.support_length_m,
+        rover.support_width_m,
+    )
+    static_margin, static_edge = _minimum_margin(current)
+    static_normalized = _normalized_margin(current, reference)
+    if acceleration_world_xyz is None:
+        effective_margin = math.nan
+        effective_normalized = math.nan
+        effective_edge = ""
+    else:
+        effective_gravity = (
+            np.asarray([0.0, 0.0, -9.80665])
+            - np.asarray(acceleration_world_xyz, dtype=np.float64)
+        )
+        try:
+            effective_projection = _project_com(
+                normal,
+                yaw,
+                rover,
+                effective_gravity,
+            )
+        except ValueError:
+            return (
+                math.degrees(roll),
+                math.degrees(pitch),
+                static_margin,
+                static_normalized,
+                static_edge,
+                math.nan,
+                math.nan,
+                "",
+            )
+        effective_margins = _support_margins(
+            effective_projection,
+            rover.support_length_m,
+            rover.support_width_m,
+        )
+        effective_margin, effective_edge = _minimum_margin(
+            effective_margins
+        )
+        effective_normalized = _normalized_margin(
+            effective_margins,
+            reference,
+        )
+    return (
+        math.degrees(roll),
+        math.degrees(pitch),
+        static_margin,
+        static_normalized,
+        static_edge,
+        effective_margin,
+        effective_normalized,
+        effective_edge,
+    )
+
+
+def _normalized_upward_normal(values: tuple[float, float, float]) -> np.ndarray:
+    normal = np.asarray(values, dtype=np.float64)
+    magnitude = float(np.linalg.norm(normal))
+    if not np.isfinite(normal).all() or magnitude <= 1e-12:
+        raise ValueError("terrain normal must be finite and non-zero")
+    normal /= magnitude
+    if normal[2] < 0.0:
+        normal *= -1.0
+    if abs(float(normal[2])) <= 1e-6:
+        raise ValueError("near-vertical terrain normal is unsupported")
+    return normal
+
+
+def _terrain_frame(normal: np.ndarray, yaw: float) -> np.ndarray:
+    cosine = math.cos(yaw)
+    sine = math.sin(yaw)
+    forward = np.asarray([
+        cosine,
+        sine,
+        -(normal[0] * cosine + normal[1] * sine) / normal[2],
+    ])
+    forward /= np.linalg.norm(forward)
+    left = np.cross(normal, forward)
+    left /= np.linalg.norm(left)
+    return np.column_stack((forward, left, normal))
+
+
+def _project_com(
+    normal: np.ndarray,
+    yaw: float,
+    rover: RoverModel,
+    direction_world: np.ndarray,
+) -> tuple[float, float]:
+    rotation = _terrain_frame(normal, yaw)
+    direction = rotation.T @ direction_world
+    if abs(float(direction[2])) <= 1e-9:
+        raise ValueError("projection direction does not meet support plane")
+    point = np.asarray([
+        rover.com_x_m,
+        rover.com_y_m,
+        rover.com_height_m,
+    ])
+    projected = point - point[2] / direction[2] * direction
+    return float(projected[0]), float(projected[1])
+
+
+def _support_margins(
+    point_xy: tuple[float, float],
+    length_m: float,
+    width_m: float,
+) -> dict[str, float]:
+    x_value, y_value = point_xy
+    return {
+        "front": length_m * 0.5 - x_value,
+        "rear": x_value + length_m * 0.5,
+        "left": width_m * 0.5 - y_value,
+        "right": y_value + width_m * 0.5,
+    }
+
+
+def _minimum_margin(margins: dict[str, float]) -> tuple[float, str]:
+    edge = min(margins, key=margins.get)
+    return float(margins[edge]), edge
+
+
+def _normalized_margin(
+    margins: dict[str, float],
+    reference: dict[str, float],
+) -> float:
+    return min(margins[edge] / reference[edge] for edge in reference)
 
 
 def _quaternion_yaw(x: float, y: float, z: float, w: float) -> float:

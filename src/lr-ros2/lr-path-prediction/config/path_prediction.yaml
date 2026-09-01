@@ -3,19 +3,31 @@ path_risk_predictor:
     input.path_topic: /lr/future_path/ground_truth
     input.terrain_topic: /terrain_geometry/grid_map
     input.objects_topic: /segmentation/boxes_3d
+    input.pose_topic: /lr/mavlink/pose
     output.steps_topic: /lr/path_prediction/steps
     output.markers_topic: /lr/path_prediction/markers
     frames.map_frame: map
 
     prediction.step_count: 20
     prediction.path_stride: 1
+    prediction.profile: static
     warning.slope_deg: 20.0
     critical.slope_deg: 30.0
-    collision.rover_radius_m: 0.55
-    collision.margin_m: 0.15
+
+    # Reference values only. Replace with measured/CAD rover parameters.
+    rover.mass_kg: 100.0
+    rover.body_length_m: 1.05
+    rover.body_width_m: 0.90
+    rover.support_length_m: 0.75
+    rover.support_width_m: 0.88
+    rover.com_x_m: 0.0
+    rover.com_y_m: 0.0
+    rover.com_height_m: 0.33
+    collision.margin_m: 0.20
 
     synchronization.max_terrain_age_sec: 2.0
     synchronization.max_objects_age_sec: 1.0
+    synchronization.max_state_age_sec: 1.0
     visualization.normal_length_m: 0.8
     visualization.marker_z_offset_m: 0.10
     visualization.label_height_m: 0.45

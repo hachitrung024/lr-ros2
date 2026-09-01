@@ -50,6 +50,34 @@ def predictions_to_diagnostics(
             _value("normal_x", normal[0] if normal else math.nan),
             _value("normal_y", normal[1] if normal else math.nan),
             _value("normal_z", normal[2] if normal else math.nan),
+            _value("rover_yaw_rad", prediction.rover_yaw_rad),
+            _value("predicted_roll_deg", prediction.predicted_roll_deg),
+            _value("predicted_pitch_deg", prediction.predicted_pitch_deg),
+            _value(
+                "static_stability_margin_m",
+                prediction.static_stability_margin_m,
+            ),
+            _value(
+                "normalized_static_stability_margin",
+                prediction.normalized_static_stability_margin,
+            ),
+            _value("nearest_static_edge", prediction.nearest_static_edge),
+            _value(
+                "dynamic_state_available",
+                prediction.dynamic_state_available,
+            ),
+            _value(
+                "effective_stability_margin_m",
+                prediction.effective_stability_margin_m,
+            ),
+            _value(
+                "normalized_effective_stability_margin",
+                prediction.normalized_effective_stability_margin,
+            ),
+            _value(
+                "nearest_effective_edge",
+                prediction.nearest_effective_edge,
+            ),
             _value(
                 "object_data_available",
                 prediction.object_data_available,

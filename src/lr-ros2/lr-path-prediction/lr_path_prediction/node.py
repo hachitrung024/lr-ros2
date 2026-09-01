@@ -6,6 +6,7 @@ import math
 import time
 
 from diagnostic_msgs.msg import DiagnosticArray
+from geometry_msgs.msg import PoseStamped
 from grid_map_msgs.msg import GridMap
 from nav_msgs.msg import Path
 import rclpy
@@ -18,7 +19,12 @@ from std_msgs.msg import Header
 from vision_msgs.msg import Detection3DArray
 from visualization_msgs.msg import Marker, MarkerArray
 
-from .core import GridMapSampler, obstacles_from_message, predict_steps
+from .core import (
+    GridMapSampler,
+    RoverModel,
+    obstacles_from_message,
+    predict_steps,
+)
 from .outputs import predictions_to_diagnostics, predictions_to_markers
 
 
@@ -37,6 +43,9 @@ class PathRiskPredictorNode(Node):
         self._objects_topic = str(self.declare_parameter(
             "input.objects_topic", "/segmentation/boxes_3d"
         ).value)
+        self._pose_topic = str(self.declare_parameter(
+            "input.pose_topic", "/lr/mavlink/pose"
+        ).value)
         steps_topic = str(self.declare_parameter(
             "output.steps_topic", "/lr/path_prediction/steps"
         ).value)
@@ -52,23 +61,52 @@ class PathRiskPredictorNode(Node):
         self._path_stride = int(self.declare_parameter(
             "prediction.path_stride", 1
         ).value)
+        self._prediction_profile = str(self.declare_parameter(
+            "prediction.profile", "static"
+        ).value).strip().lower()
         self._slope_warning_deg = float(self.declare_parameter(
             "warning.slope_deg", 20.0
         ).value)
         self._slope_critical_deg = float(self.declare_parameter(
             "critical.slope_deg", 30.0
         ).value)
-        self._rover_radius_m = float(self.declare_parameter(
-            "collision.rover_radius_m", 0.55
-        ).value)
-        self._collision_margin_m = float(self.declare_parameter(
-            "collision.margin_m", 0.15
-        ).value)
+        self._rover = RoverModel(
+            mass_kg=float(self.declare_parameter(
+                "rover.mass_kg", 100.0
+            ).value),
+            body_length_m=float(self.declare_parameter(
+                "rover.body_length_m", 1.05
+            ).value),
+            body_width_m=float(self.declare_parameter(
+                "rover.body_width_m", 0.90
+            ).value),
+            support_length_m=float(self.declare_parameter(
+                "rover.support_length_m", 0.75
+            ).value),
+            support_width_m=float(self.declare_parameter(
+                "rover.support_width_m", 0.88
+            ).value),
+            com_x_m=float(self.declare_parameter(
+                "rover.com_x_m", 0.0
+            ).value),
+            com_y_m=float(self.declare_parameter(
+                "rover.com_y_m", 0.0
+            ).value),
+            com_height_m=float(self.declare_parameter(
+                "rover.com_height_m", 0.33
+            ).value),
+            collision_margin_m=float(self.declare_parameter(
+                "collision.margin_m", 0.20
+            ).value),
+        )
         self._max_terrain_age_sec = float(self.declare_parameter(
             "synchronization.max_terrain_age_sec", 2.0
         ).value)
         self._max_objects_age_sec = float(self.declare_parameter(
             "synchronization.max_objects_age_sec", 1.0
+        ).value)
+        self._max_state_age_sec = float(self.declare_parameter(
+            "synchronization.max_state_age_sec", 1.0
         ).value)
         self._normal_length_m = float(self.declare_parameter(
             "visualization.normal_length_m", 0.8
@@ -122,6 +160,14 @@ class PathRiskPredictorNode(Node):
             self._on_objects,
             object_qos,
         )
+        self._pose_subscription = None
+        if self._prediction_profile == "dynamic":
+            self._pose_subscription = self.create_subscription(
+                PoseStamped,
+                self._pose_topic,
+                self._on_pose,
+                reliable_qos,
+            )
 
         self._latest_path = None
         self._terrain_sampler = None
@@ -131,6 +177,7 @@ class PathRiskPredictorNode(Node):
         self._objects_stamp_ns = 0
         self._objects_frame = ""
         self._objects_received = False
+        self._state_estimator = PoseAccelerationEstimator()
         self._last_warning_monotonic = 0.0
         self._time_jump_handle = self.get_clock().create_jump_callback(
             JumpThreshold(
@@ -141,9 +188,10 @@ class PathRiskPredictorNode(Node):
             post_callback=self._on_time_jump,
         )
         self.get_logger().info(
-            "20-step prediction: path=%s terrain=%s objects=%s "
-            "steps=%s markers=%s"
+            "integrated 20-step prediction (%s): path=%s terrain=%s "
+            "objects=%s steps=%s markers=%s"
             % (
+                self._prediction_profile,
                 self._path_topic,
                 self._terrain_topic,
                 self._objects_topic,
@@ -161,6 +209,7 @@ class PathRiskPredictorNode(Node):
             ("input.path_topic", self._path_topic),
             ("input.terrain_topic", self._terrain_topic),
             ("input.objects_topic", self._objects_topic),
+            ("input.pose_topic", self._pose_topic),
             ("output.steps_topic", steps_topic),
             ("output.markers_topic", markers_topic),
             ("frames.map_frame", self._map_frame),
@@ -171,11 +220,12 @@ class PathRiskPredictorNode(Node):
             raise ValueError(
                 "prediction step_count and path_stride must be positive"
             )
+        if self._prediction_profile not in ("static", "dynamic"):
+            raise ValueError("prediction.profile must be 'static' or 'dynamic'")
+        self._rover.validate()
         finite_nonnegative = (
             ("warning.slope_deg", self._slope_warning_deg),
             ("critical.slope_deg", self._slope_critical_deg),
-            ("collision.rover_radius_m", self._rover_radius_m),
-            ("collision.margin_m", self._collision_margin_m),
             ("visualization.marker_z_offset_m", self._marker_z_offset_m),
             ("visualization.label_height_m", self._label_height_m),
         )
@@ -190,6 +240,10 @@ class PathRiskPredictorNode(Node):
             (
                 "synchronization.max_objects_age_sec",
                 self._max_objects_age_sec,
+            ),
+            (
+                "synchronization.max_state_age_sec",
+                self._max_state_age_sec,
             ),
             ("visualization.normal_length_m", self._normal_length_m),
         ):
@@ -220,6 +274,20 @@ class PathRiskPredictorNode(Node):
         self._objects_stamp_ns = _stamp_ns(message.header)
         self._objects_frame = message.header.frame_id
         self._objects_received = True
+        self._publish_prediction()
+
+    def _on_pose(self, message: PoseStamped) -> None:
+        if message.header.frame_id != self._map_frame:
+            self._warn(
+                f"Pose frame '{message.header.frame_id}' does not match "
+                f"'{self._map_frame}'"
+            )
+            return
+        try:
+            self._state_estimator.add(message)
+        except ValueError as error:
+            self._warn(f"Ignoring malformed rover pose: {error}")
+            return
         self._publish_prediction()
 
     def _publish_prediction(self) -> None:
@@ -256,16 +324,32 @@ class PathRiskPredictorNode(Node):
                 self._max_objects_age_sec,
             )
         )
-        predictions = predict_steps(
-            path,
-            self._terrain_sampler if terrain_available else None,
-            self._obstacles if object_data_available else [],
-            object_data_available=object_data_available,
-            step_count=self._step_count,
-            path_stride=self._path_stride,
-            rover_radius_m=self._rover_radius_m,
-            collision_margin_m=self._collision_margin_m,
-        )
+        acceleration = None
+        if (
+            self._prediction_profile == "dynamic"
+            and self._state_estimator.acceleration is not None
+            and _is_fresh(
+                path_stamp_ns,
+                self._state_estimator.stamp_ns,
+                self._max_state_age_sec,
+            )
+        ):
+            acceleration = self._state_estimator.acceleration
+        try:
+            predictions = predict_steps(
+                path,
+                self._terrain_sampler if terrain_available else None,
+                self._obstacles if object_data_available else [],
+                object_data_available=object_data_available,
+                step_count=self._step_count,
+                path_stride=self._path_stride,
+                rover=self._rover,
+                acceleration_world_xyz=acceleration,
+            )
+        except ValueError as error:
+            self._warn(f"Cannot predict current path: {error}")
+            self._publish_empty(path.header)
+            return
         if len(predictions) < self._step_count:
             self._warn(
                 f"Future path provides only {len(predictions)} of "
@@ -306,6 +390,7 @@ class PathRiskPredictorNode(Node):
         self._objects_stamp_ns = 0
         self._objects_frame = ""
         self._objects_received = False
+        self._state_estimator.reset()
         now_header = Header(
             stamp=self.get_clock().now().to_msg(),
             frame_id=self._map_frame,
@@ -330,6 +415,55 @@ def _is_fresh(path_stamp_ns: int, input_stamp_ns: int, limit_sec: float) -> bool
     if path_stamp_ns <= 0 or input_stamp_ns <= 0:
         return False
     return abs(path_stamp_ns - input_stamp_ns) <= int(limit_sec * 1e9)
+
+
+class PoseAccelerationEstimator:
+    """Estimate map-frame kinematic acceleration from stamped rover poses."""
+
+    def __init__(self) -> None:
+        """Initialize an empty finite-difference history."""
+        self.reset()
+
+    def reset(self) -> None:
+        """Clear pose, velocity, and acceleration history."""
+        self._previous_stamp_ns = 0
+        self._previous_position = None
+        self._previous_velocity = None
+        self._previous_dt_sec = None
+        self.acceleration = None
+        self.stamp_ns = 0
+
+    def add(self, message: PoseStamped) -> None:
+        """Add one pose and update acceleration after three samples."""
+        stamp_ns = _stamp_ns(message.header)
+        position = message.pose.position
+        current = (
+            float(position.x),
+            float(position.y),
+            float(position.z),
+        )
+        if stamp_ns <= 0 or not all(math.isfinite(value) for value in current):
+            raise ValueError("pose stamp and position must be finite and valid")
+        if self._previous_stamp_ns and stamp_ns <= self._previous_stamp_ns:
+            self.reset()
+        if self._previous_position is not None:
+            dt_sec = (stamp_ns - self._previous_stamp_ns) * 1e-9
+            velocity = tuple(
+                (current[index] - self._previous_position[index]) / dt_sec
+                for index in range(3)
+            )
+            if self._previous_velocity is not None:
+                derivative_dt = 0.5 * (dt_sec + self._previous_dt_sec)
+                self.acceleration = tuple(
+                    (velocity[index] - self._previous_velocity[index])
+                    / derivative_dt
+                    for index in range(3)
+                )
+                self.stamp_ns = stamp_ns
+            self._previous_velocity = velocity
+            self._previous_dt_sec = dt_sec
+        self._previous_position = current
+        self._previous_stamp_ns = stamp_ns
 
 
 def main(args=None) -> None:
