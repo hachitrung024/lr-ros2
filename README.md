@@ -2,9 +2,9 @@
 
 ## Full launch command
 
-The following command plays an SVO, automatically finds the matching MAVLink
-session, uses MAVLink instead of ZED dynamic TF, publishes the future
-ground-truth path, and starts segmentation, terrain geometry, and RViz:
+This command plays an SVO, selects its matching MAVLink session, publishes the
+future ground-truth path, and starts segmentation, terrain geometry, canonical
+prediction, and RViz:
 
 ```bash
 ros2 launch lr_display_rviz2 display_zed_cam.launch.py \
@@ -16,16 +16,77 @@ ros2 launch lr_display_rviz2 display_zed_cam.launch.py \
   svo_path:=/path/to/recording.svo2
 ```
 
-By default, `mavlink_db_path` is empty and the launch file recursively searches
+The prediction launch arguments are optional. The command above uses the
+default `prediction_profile:=static`. To run the dynamic model, append:
+
+```bash
+prediction_profile:=dynamic
+```
+
+Dynamic prediction currently requires `mavlink:=true` because its rover-state
+adapter derives velocity and acceleration from `/lr/mavlink/pose`.
+
+By default, `mavlink_db_path` is empty and the launch recursively searches
 `mavlink_dir` for `session_mavlink.db`. To select a database explicitly, use:
 
 ```bash
 mavlink_db_path:=/path/to/session_mavlink.db
 ```
 
-When `future_path:=true` is enabled together with `mavlink:=true`, the future
-path is read directly from the MAVLink database, so `future_path_cache_dir` and
-`future_path_rebuild_cache` are not used.
+When `future_path:=true` and `mavlink:=true`, the future path is read directly
+from the MAVLink database. The SVO VIO pose-cache pass is therefore skipped.
+
+## Canonical prediction pipeline
+
+The complete runtime Prediction implementation from the provided
+`prediction-rover` source is now integrated as normal ROS 2 packages under
+`src/lr-ros2`:
+
+| Package | Responsibility |
+|---|---|
+| `safety_perception_msgs` | Canonical typed ROS messages |
+| `prediction_core` | ROS-independent collision and rollover physics |
+| `prediction_ros` | Runtime node that publishes raw safety evidence |
+| `lr_prediction_bridge` | Adapters from LR pipeline messages to canonical messages |
+| `lr_path_prediction` | Diagnostic and RViz presentation of canonical output |
+
+The top-level `prediction-rover/` directory is reference source only and is
+ignored by `colcon`. It may be removed after this integration without changing
+the build or runtime pipeline.
+
+The adapters perform these conversions:
+
+| LR input | Canonical topic |
+|---|---|
+| `/lr/future_path/ground_truth` (`nav_msgs/Path`) | `/trajectory` (`safety_perception_msgs/Trajectory`) |
+| `/terrain_geometry/grid_map` (`grid_map_msgs/GridMap`) | `/geometry` (`safety_perception_msgs/GeometryArray`) |
+| `/segmentation/boxes_3d` (`vision_msgs/Detection3DArray`) | `/tracked_objects` (`safety_perception_msgs/TrackedObjectArray`) |
+| `/lr/mavlink/pose` (`geometry_msgs/PoseStamped`) | `/rover/state` (`safety_perception_msgs/RoverState`), dynamic only |
+
+For up to 20 future steps, the canonical engine computes discrete oriented
+footprint collision candidates, terrain-relative roll and pitch, Static SSM,
+and normalized Static SSM. The dynamic profile additionally computes edge
+Stability Moments and point-mass ZMP when acceleration is available.
+
+`/predict_output` is raw safety evidence. It intentionally does not assign
+risk severity, apply Stop/Go policy, or command the rover. The visualization
+node derives only UI warnings from that evidence:
+
+- gray points when no warning is available;
+- a slope label when terrain geometry exists;
+- one large triangle/`!` above the nearest actual footprint intersection;
+- terrain-normal arrows;
+- orange/red points for configured slope display thresholds; only the nearest
+  actual intersection is highlighted in magenta.
+
+Steps outside the current terrain GridMap remain gray. Current segmentation
+does not provide persistent tracks or object velocity, so detected objects are
+treated as static within each prediction cycle.
+
+The raw engine also reports objects within `collision_margin_m` as collision
+candidates. A positive-clearance candidate does not add `!` or change the RViz
+color; it remains available in `/predict_output` for a downstream Decision
+Node.
 
 ## Building
 
@@ -34,6 +95,10 @@ cd /path/to/ros2_ws
 source /opt/ros/humble/setup.bash
 colcon build --symlink-install \
   --packages-select \
+  safety_perception_msgs \
+  prediction_core \
+  prediction_ros \
+  lr_prediction_bridge \
   lr_future_path \
   lr_segmentation \
   lr_terrain_geometry \
@@ -42,9 +107,47 @@ colcon build --symlink-install \
 source install/setup.bash
 ```
 
-## Common modes
+No installation from `prediction-rover/` is required.
 
-### SVO with ZED pose, without MAVLink
+## Rover configuration
+
+The bundled rover values are references only. Before field use, replace them
+with measured/CAD mass, body dimensions, support polygon, center of mass,
+ground clearance, and collision margin. Supply the resulting file with:
+
+```bash
+prediction_rover_config:=/path/to/rover.yaml
+```
+
+`prediction_params_file` configures only diagnostic/RViz presentation, such as
+slope thresholds and marker dimensions. It does not configure the physics
+model.
+
+## Main outputs
+
+```text
+/lr/mavlink/pose
+/lr/future_path/ground_truth
+/segmentation/overlay
+/segmentation/boxes_3d
+/terrain_geometry/grid_map
+/terrain_geometry/markers
+/trajectory
+/geometry
+/tracked_objects
+/rover/state                  # dynamic profile
+/predict_output               # canonical raw safety evidence
+/lr/path_prediction/steps     # DiagnosticArray presentation
+/lr/path_prediction/markers   # RViz MarkerArray presentation
+```
+
+`/lr/future_path/ground_truth` is a recorded future trajectory for offline
+visualization and evaluation. It is not a planned path and must not be used to
+control the rover.
+
+## Other camera modes
+
+SVO with ZED pose, without MAVLink or future prediction:
 
 ```bash
 ros2 launch lr_display_rviz2 display_zed_cam.launch.py \
@@ -56,7 +159,7 @@ ros2 launch lr_display_rviz2 display_zed_cam.launch.py \
   segmentation_model_path:=/path/to/best.pt
 ```
 
-### Future path from ZED VIO
+Future path from ZED VIO:
 
 ```bash
 ros2 launch lr_display_rviz2 display_zed_cam.launch.py \
@@ -68,10 +171,7 @@ ros2 launch lr_display_rviz2 display_zed_cam.launch.py \
   future_path_cache_dir:=/path/to/future_path_cache
 ```
 
-The first run creates a rosbag2 pose cache from the SVO. Later runs reuse the
-cache.
-
-### Live camera
+Live camera:
 
 ```bash
 ros2 launch lr_display_rviz2 display_zed_cam.launch.py \
@@ -83,54 +183,6 @@ ros2 launch lr_display_rviz2 display_zed_cam.launch.py \
 ```
 
 MAVLink and the future ground-truth path are supported only with SVO playback,
-not with a live camera.
-
-## Main outputs
-
-```text
-/lr/mavlink/pose
-/lr/future_path/ground_truth
-/segmentation/overlay
-/segmentation/boxes_3d
-/terrain_geometry/grid_map
-/terrain_geometry/markers
-/terrain_geometry/heatmap
-/lr/path_prediction/steps
-/lr/path_prediction/markers
-```
-
-When `future_path:=true`, terrain, and segmentation are enabled, the launch
-also starts one self-contained `path_risk_predictor` node. It evaluates the
-next 20 path poses (the current pose is excluded), uses the configured oriented
-rectangular rover footprint for object clearance/collision, and computes
-terrain roll, pitch, and static stability margin wherever a terrain normal is
-available. It has no runtime or build dependency on the `prediction-rover/`
-reference repository.
-
-`/lr/path_prediction/steps` adds slope, normal, collision IDs, roll/pitch, and
-stability evidence. `/lr/path_prediction/markers` shows all 20 path points,
-compact slope labels, `!` collision marks, and terrain-normal arrows. Steps
-without valid terrain stay gray and have no slope label. Colors change to
-orange/red for slope warnings and magenta for a footprint collision.
-
-The rover values in `lr_path_prediction/config/path_prediction.yaml` are
-estimates only. Replace them with measured mass, body/support dimensions, and
-center-of-mass values before field use. A different parameter file can be used
-with:
-
-```bash
-prediction_params_file:=/path/to/path_prediction.yaml
-```
-
-The default `prediction_profile:=static` does not require velocity. Optional
-`prediction_profile:=dynamic` makes the same node estimate map-frame kinematic
-acceleration directly from `/lr/mavlink/pose` and adds effective stability
-margin evidence. No state adapter is required.
-
-MAVLink publishes the `map -> zed_camera_link` TF when
-`camera_name:=zed`. If exactly one MAVLink session matching the SVO timestamp
-cannot be found, the launch stops and does not fall back to ZED TF.
-
-`/lr/future_path/ground_truth` is the recorded future trajectory for
-visualization and offline evaluation. It is not a planned path and must not be
-used to control the rover.
+not with a live camera. MAVLink publishes `map -> zed_camera_link` when
+`camera_name:=zed`. If exactly one session matching the SVO timestamp cannot be
+found, the launch stops instead of falling back to ZED localization.

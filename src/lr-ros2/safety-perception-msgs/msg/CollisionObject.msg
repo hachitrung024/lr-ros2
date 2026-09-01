@@ -1,0 +1,5 @@
+uint64 track_id
+string object_class
+float64 min_distance_m
+float32 confidence
+bool confidence_valid

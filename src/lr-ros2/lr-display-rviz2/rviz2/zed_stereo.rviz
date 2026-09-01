@@ -149,20 +149,24 @@ Visualization Manager:
       Enabled: true
       Name: Segmentation 3D Boxes
       Namespaces:
+        segmentation_box_fills: true
+        segmentation_box_frames: true
         segmentation_box_ids: true
-        segmentation_boxes: true
       Topic:
         Depth: 1
         Durability Policy: Volatile
         Filter size: 1
         History Policy: Keep Last
-        Reliability Policy: Best Effort
+        Reliability Policy: Reliable
         Value: /segmentation/box_markers
       Value: true
     - Class: rviz_default_plugins/MarkerArray
       Enabled: true
       Name: Future Step Risk Prediction
       Namespaces:
+        collision_warning_fill: true
+        collision_warning_outline: true
+        collision_warning_symbol: true
         prediction_labels: true
         prediction_path: true
         prediction_steps: true

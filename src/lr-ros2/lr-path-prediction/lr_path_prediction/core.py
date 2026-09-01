@@ -107,6 +107,15 @@ class StepPrediction:
     effective_stability_margin_m: float = math.nan
     normalized_effective_stability_margin: float = math.nan
     nearest_effective_edge: str = ""
+    stability_moment_valid: bool = False
+    minimum_stability_moment_nm: float = math.nan
+    normalized_minimum_stability_moment: float = math.nan
+    minimum_normalized_moment_edge: str = ""
+    zmp_valid: bool = False
+    zmp_xy: tuple[float, float] | None = None
+    zmp_margin_m: float = math.nan
+    normalized_zmp_margin: float = math.nan
+    nearest_zmp_edge: str = ""
 
 
 class GridMapSampler:

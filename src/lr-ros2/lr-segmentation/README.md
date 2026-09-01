@@ -15,7 +15,7 @@ python3 -m pip install -r src/lr-ros2/lr-segmentation/requirements.txt
 ```bash
 ros2 launch lr_segmentation segmentation.launch.py \
   camera_name:=zed \
-  model_path:=/workspace/testros2/models/best.pt
+  model_path:=/path/to/best.pt
 ```
 
 The launch derives registered ZED inputs from `camera_name`:
@@ -36,7 +36,12 @@ image-domain segmentation node.
 - `/segmentation/boxes_3d`: `vision_msgs/msg/Detection3DArray`. Every detection
   contains an oriented metric `BoundingBox3D` and a stable tracker ID.
 - `/segmentation/box_markers`: `visualization_msgs/msg/MarkerArray` for RViz
-  only; it contains transparent box cubes and their tracker IDs.
+  only; it contains lightly filled cubes, bold oriented wireframes, and their
+  tracker IDs.
+
+The default wireframe is 0.07 m thick and uses Reliable QoS. Its width, fill
+alpha, and label size are configurable with the `visualization.*` parameters in
+`config/segmentation.yaml`.
 
 The estimator synchronizes mask and depth within 50 ms. It filters depth
 outliers, fits an oriented box with a gravity-aligned vertical axis, and applies

@@ -1,0 +1,16 @@
+# TEST / MOCK VALUES ONLY — NOT VERIFIED LANDFILL ROVER PARAMETERS.
+# Replace these estimates with measured/CAD values before field use.
+rover:
+  mass_kg: 100.0
+  body_length_m: 1.05
+  body_width_m: 0.90
+  body_height_m: 0.50
+  support_length_m: 0.75
+  support_width_m: 0.88
+  ground_clearance_m: 0.15
+  com_x_m: 0.0
+  com_y_m: 0.0
+  com_height_m: 0.33
+
+prediction:
+  collision_margin_m: 0.20

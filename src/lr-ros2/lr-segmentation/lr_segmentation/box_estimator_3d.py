@@ -7,7 +7,7 @@ import math
 
 import numpy as np
 import rclpy
-from geometry_msgs.msg import Pose
+from geometry_msgs.msg import Point, Pose
 from rclpy.clock import JumpThreshold
 from rclpy.duration import Duration
 from rclpy.executors import ExternalShutdownException
@@ -340,6 +340,21 @@ class BoxEstimator3DNode(Node):
         self._minimum_box_size_m = float(
             self.declare_parameter("box.minimum_size_m", 0.05).value
         )
+        self._box_marker_line_width_m = float(
+            self.declare_parameter(
+                "visualization.box_line_width_m", 0.07
+            ).value
+        )
+        self._box_marker_fill_alpha = float(
+            self.declare_parameter(
+                "visualization.box_fill_alpha", 0.12
+            ).value
+        )
+        self._box_marker_label_scale_m = float(
+            self.declare_parameter(
+                "visualization.label_scale_m", 0.28
+            ).value
+        )
         self._validate_parameters()
         self._tracker = BoxTracker(
             association_distance_m=float(
@@ -390,10 +405,13 @@ class BoxEstimator3DNode(Node):
             str(self._box_topic),
             sensor_qos,
         )
+        marker_qos = QoSProfile(depth=1)
+        marker_qos.reliability = ReliabilityPolicy.RELIABLE
+        marker_qos.durability = DurabilityPolicy.VOLATILE
         self._marker_publisher = self.create_publisher(
             MarkerArray,
             str(self._marker_topic),
-            sensor_qos,
+            marker_qos,
         )
         self._mask_subscription = self.create_subscription(
             Image,
@@ -470,6 +488,18 @@ class BoxEstimator3DNode(Node):
         if not 0.0 <= self._trim_fraction < 0.5:
             raise ValueError("box.trim_fraction must be in [0, 0.5)")
         _require_positive("box.minimum_size_m", self._minimum_box_size_m)
+        _require_positive(
+            "visualization.box_line_width_m",
+            self._box_marker_line_width_m,
+        )
+        if not 0.0 <= self._box_marker_fill_alpha <= 1.0:
+            raise ValueError(
+                "visualization.box_fill_alpha must be in [0, 1]"
+            )
+        _require_positive(
+            "visualization.label_scale_m",
+            self._box_marker_label_scale_m,
+        )
         self._up_axis = _unit_vector(self._up_axis, "geometry.up_axis")
 
     def _on_mask(self, message: Image) -> None:
@@ -551,7 +581,13 @@ class BoxEstimator3DNode(Node):
             _stamp_seconds(header),
         )
         self._box_publisher.publish(_detection_array(header, tracked_boxes))
-        self._marker_publisher.publish(_marker_array(header, tracked_boxes))
+        self._marker_publisher.publish(_marker_array(
+            header,
+            tracked_boxes,
+            line_width_m=self._box_marker_line_width_m,
+            fill_alpha=self._box_marker_fill_alpha,
+            label_scale_m=self._box_marker_label_scale_m,
+        ))
 
     def _measure_boxes(
         self,
@@ -836,8 +872,15 @@ def _detection_array(
     return array
 
 
-def _marker_array(header: Header, boxes: list[TrackedBox]) -> MarkerArray:
-    """Render tracked boxes as transparent cubes and persistent-ID labels."""
+def _marker_array(
+    header: Header,
+    boxes: list[TrackedBox],
+    *,
+    line_width_m: float,
+    fill_alpha: float,
+    label_scale_m: float,
+) -> MarkerArray:
+    """Render tracked boxes with bold wireframes and persistent-ID labels."""
     array = MarkerArray()
     clear = Marker()
     clear.header = header
@@ -847,8 +890,8 @@ def _marker_array(header: Header, boxes: list[TrackedBox]) -> MarkerArray:
         red, green, blue = _track_color(box.track_id)
         cube = Marker()
         cube.header = header
-        cube.ns = "segmentation_boxes"
-        cube.id = box.track_id * 2
+        cube.ns = "segmentation_box_fills"
+        cube.id = box.track_id * 3
         cube.type = Marker.CUBE
         cube.action = Marker.ADD
         cube.pose = _pose(box.center, box.orientation)
@@ -858,14 +901,29 @@ def _marker_array(header: Header, boxes: list[TrackedBox]) -> MarkerArray:
         cube.color.r = red
         cube.color.g = green
         cube.color.b = blue
-        cube.color.a = 0.35
+        cube.color.a = fill_alpha
         array.markers.append(cube)
+
+        frame = Marker()
+        frame.header = header
+        frame.ns = "segmentation_box_frames"
+        frame.id = box.track_id * 3 + 1
+        frame.type = Marker.LINE_LIST
+        frame.action = Marker.ADD
+        frame.pose = _pose(box.center, box.orientation)
+        frame.scale.x = line_width_m
+        frame.color.r = red
+        frame.color.g = green
+        frame.color.b = blue
+        frame.color.a = 1.0
+        frame.points = _box_wireframe_points(box.size)
+        array.markers.append(frame)
 
         rotation = _quaternion_to_matrix(box.orientation)
         label = Marker()
         label.header = header
         label.ns = "segmentation_box_ids"
-        label.id = box.track_id * 2 + 1
+        label.id = box.track_id * 3 + 2
         label.type = Marker.TEXT_VIEW_FACING
         label.action = Marker.ADD
         label.pose.position.x = float(
@@ -878,7 +936,7 @@ def _marker_array(header: Header, boxes: list[TrackedBox]) -> MarkerArray:
             box.center[2] + rotation[2, 2] * (box.size[2] * 0.5 + 0.15)
         )
         label.pose.orientation.w = 1.0
-        label.scale.z = 0.20
+        label.scale.z = label_scale_m
         label.color.r = red
         label.color.g = green
         label.color.b = blue
@@ -886,6 +944,33 @@ def _marker_array(header: Header, boxes: list[TrackedBox]) -> MarkerArray:
         label.text = f"ID {box.track_id}"
         array.markers.append(label)
     return array
+
+
+def _box_wireframe_points(size: np.ndarray) -> list[Point]:
+    """Return the twelve local-space edges of an oriented box."""
+    half_x, half_y, half_z = (
+        float(value) * 0.5 for value in size
+    )
+    corners = (
+        (-half_x, -half_y, -half_z),
+        (half_x, -half_y, -half_z),
+        (half_x, half_y, -half_z),
+        (-half_x, half_y, -half_z),
+        (-half_x, -half_y, half_z),
+        (half_x, -half_y, half_z),
+        (half_x, half_y, half_z),
+        (-half_x, half_y, half_z),
+    )
+    edge_indices = (
+        (0, 1), (1, 2), (2, 3), (3, 0),
+        (4, 5), (5, 6), (6, 7), (7, 4),
+        (0, 4), (1, 5), (2, 6), (3, 7),
+    )
+    return [
+        Point(x=corners[index][0], y=corners[index][1], z=corners[index][2])
+        for edge in edge_indices
+        for index in edge
+    ]
 
 
 def _track_color(track_id: int) -> tuple[float, float, float]:

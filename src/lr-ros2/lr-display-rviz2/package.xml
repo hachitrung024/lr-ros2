@@ -32,6 +32,10 @@
     <exec_depend>lr_segmentation</exec_depend>
     <exec_depend>lr_future_path</exec_depend>
     <exec_depend>lr_path_prediction</exec_depend>
+    <exec_depend>lr_prediction_bridge</exec_depend>
+    <exec_depend>prediction_core</exec_depend>
+    <exec_depend>prediction_ros</exec_depend>
+    <exec_depend>safety_perception_msgs</exec_depend>
 
     <test_depend>ament_lint_auto</test_depend>
     <test_depend>ament_lint_common</test_depend>

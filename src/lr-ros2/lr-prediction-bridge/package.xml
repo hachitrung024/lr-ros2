@@ -1,0 +1,34 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>lr_prediction_bridge</name>
+  <version>0.1.0</version>
+  <description>
+    Thin upstream→Prediction adapters for landfill rover P0 integration.
+    Converts mavlink Path / pose streams and terrain GridMap normals into
+    canonical safety_perception_msgs topics consumed by prediction_ros.
+  </description>
+  <maintainer email="dev@example.com">Landfill Rover Team</maintainer>
+  <license>Proprietary</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>grid_map_msgs</exec_depend>
+  <exec_depend>builtin_interfaces</exec_depend>
+  <exec_depend>message_filters</exec_depend>
+  <exec_depend>safety_perception_msgs</exec_depend>
+  <exec_depend>vision_msgs</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

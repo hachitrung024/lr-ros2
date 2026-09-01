@@ -137,6 +137,8 @@ def launch_setup(context, *args, **kwargs):
     prediction_params_file = LaunchConfiguration(
         'prediction_params_file')
     prediction_profile = LaunchConfiguration('prediction_profile')
+    prediction_rover_config = LaunchConfiguration(
+        'prediction_rover_config')
 
     camera_name_val = camera_name.perform(context)
     camera_model_val = camera_model.perform(context)
@@ -415,26 +417,100 @@ def launch_setup(context, *args, **kwargs):
 
         prediction_condition = IfCondition(
             TextSubstitution(text=start_prediction_val))
+        trajectory_adapter_node = Node(
+            package='lr_prediction_bridge',
+            executable='trajectory_adapter_node',
+            name='trajectory_adapter_node',
+            output='screen',
+            parameters=[{
+                'input_topic': future_path_topic,
+                'expected_frame_id': map_frame,
+                'force_frame_id_map': True,
+                'horizon_steps': 20,
+                'output_dt_sec': 0.25,
+                'min_distance_from_start_m': 1.0,
+                'minimum_cycle_period_sec': 0.25,
+                'use_sim_time': publish_svo_clock,
+            }],
+            condition=prediction_condition,
+        )
+        geometry_adapter_node = Node(
+            package='lr_prediction_bridge',
+            executable='geometry_adapter_node',
+            name='geometry_adapter_node',
+            output='screen',
+            parameters=[{
+                'grid_map_topic': '/terrain_geometry/grid_map',
+                'expected_frame_id': map_frame,
+                'force_frame_id_map': True,
+                'allow_flat_fallback': False,
+                'use_sim_time': publish_svo_clock,
+            }],
+            condition=prediction_condition,
+        )
+        tracked_objects_adapter_node = Node(
+            package='lr_prediction_bridge',
+            executable='tracked_objects_adapter_node',
+            name='tracked_objects_adapter_node',
+            output='screen',
+            parameters=[{
+                'input_topic': '/segmentation/boxes_3d',
+                'expected_frame_id': map_frame,
+                'use_sim_time': publish_svo_clock,
+            }],
+            condition=prediction_condition,
+        )
         prediction_node = Node(
+            package='prediction_ros',
+            executable='prediction_node',
+            name='prediction_node',
+            output='screen',
+            parameters=[{
+                'config_path': prediction_rover_config,
+                'prediction_profile': prediction_profile,
+                'expected_frame_id': map_frame,
+                'require_full_geometry_coverage': False,
+                'reuse_latest_inputs_per_cycle': True,
+                'use_sim_time': publish_svo_clock,
+            }],
+            condition=prediction_condition,
+        )
+        prediction_visualizer_node = Node(
             package='lr_path_prediction',
-            executable='path_risk_predictor_node',
-            name='path_risk_predictor',
+            executable='canonical_prediction_visualizer_node',
+            name='canonical_prediction_visualizer',
             output='screen',
             parameters=[
                 prediction_params_file,
                 {
-                    'input.path_topic': future_path_topic,
                     'input.terrain_topic': '/terrain_geometry/grid_map',
-                    'input.objects_topic': '/segmentation/boxes_3d',
-                    'input.pose_topic': mavlink_pose_topic,
                     'frames.map_frame': map_frame,
-                    'prediction.profile': prediction_profile,
                     'use_sim_time': publish_svo_clock,
                 }
             ],
             condition=prediction_condition,
         )
-        nodes.append(prediction_node)
+        nodes.extend([
+            trajectory_adapter_node,
+            geometry_adapter_node,
+            tracked_objects_adapter_node,
+            prediction_node,
+            prediction_visualizer_node,
+        ])
+        if prediction_profile_val == 'dynamic':
+            nodes.append(Node(
+                package='lr_prediction_bridge',
+                executable='rover_state_adapter_node',
+                name='rover_state_adapter_node',
+                output='screen',
+                parameters=[{
+                    'pose_topic': mavlink_pose_topic,
+                    'expected_frame_id': map_frame,
+                    'force_frame_id_map': True,
+                    'use_sim_time': publish_svo_clock,
+                }],
+                condition=prediction_condition,
+            ))
 
     if not future_path_val:
         return (
@@ -715,9 +791,19 @@ def generate_launch_description():
                 'prediction_profile',
                 default_value='static',
                 description=(
-                    'Prediction profile. Dynamic additionally estimates '
-                    'acceleration directly from MAVLink pose.'),
+                    'Canonical prediction profile. Dynamic additionally uses '
+                    'finite-difference acceleration from MAVLink pose.'),
                 choices=['static', 'dynamic']),
+            DeclareLaunchArgument(
+                'prediction_rover_config',
+                default_value=os.path.join(
+                    get_package_share_directory('prediction_core'),
+                    'config',
+                    'rover.reference.yaml'
+                ),
+                description=(
+                    'Measured rover geometry/mass/CoM YAML. Bundled values '
+                    'are references only and are not field-safe.')),
             OpaqueFunction(function=launch_setup)
         ]
     )

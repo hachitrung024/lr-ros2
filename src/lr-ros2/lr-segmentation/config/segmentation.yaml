@@ -26,6 +26,9 @@ box_estimator_3d:
     minimum_depth_band_m: 0.15
     box.trim_fraction: 0.02
     box.minimum_size_m: 0.05
+    visualization.box_line_width_m: 0.07
+    visualization.box_fill_alpha: 0.12
+    visualization.label_scale_m: 0.28
     tracking.association_distance_m: 1.0
     tracking.max_missed_frames: 5
     tracking.min_confirmations: 2

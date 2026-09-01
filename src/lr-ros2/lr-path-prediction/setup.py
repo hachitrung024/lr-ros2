@@ -21,12 +21,13 @@ setup(
     zip_safe=True,
     maintainer="Landfill Rover",
     maintainer_email="maintainers@example.com",
-    description="Twenty-step terrain and obstacle path prediction",
+    description="Diagnostics and RViz presentation for canonical path prediction",
     license="Apache-2.0",
     extras_require={"test": ["pytest"]},
     entry_points={
         "console_scripts": [
-            "path_risk_predictor_node = lr_path_prediction.node:main",
+            "canonical_prediction_visualizer_node = "
+            "lr_path_prediction.canonical_visualizer_node:main",
         ],
     },
 )

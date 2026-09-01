@@ -207,9 +207,15 @@ def test_box_node_publishes_standard_detection3d_array(ros_context):
         assert [marker.type for marker in markers[-1].markers] == [
             Marker.ARROW,
             Marker.CUBE,
+            Marker.LINE_LIST,
             Marker.TEXT_VIEW_FACING,
         ]
         assert markers[-1].markers[0].action == Marker.DELETEALL
+        frame = markers[-1].markers[2]
+        assert frame.ns == "segmentation_box_frames"
+        assert frame.scale.x == pytest.approx(0.07)
+        assert frame.color.a == pytest.approx(1.0)
+        assert len(frame.points) == 24
     finally:
         executor.remove_node(node)
         executor.remove_node(driver)

@@ -68,6 +68,7 @@ def _context(**overrides):
         "start_path_prediction_node": "auto",
         "prediction_params_file": "/tmp/path_prediction.yaml",
         "prediction_profile": "static",
+        "prediction_rover_config": "/tmp/rover.yaml",
     }
     values.update(overrides)
     context = LaunchContext()
@@ -146,16 +147,18 @@ def test_prediction_auto_starts_with_all_three_inputs():
     actions = module.launch_setup(context)
 
     executables = _node_executables(actions)
-    assert executables.count("path_risk_predictor_node") == 1
-    assert "trajectory_adapter_node" not in executables
-    assert "geometry_adapter_node" not in executables
-    assert "tracked_objects_adapter_node" not in executables
-    assert "prediction_node" not in executables
-    assert "canonical_prediction_visualizer_node" not in executables
+    assert "path_risk_predictor_node" not in executables
+    assert {
+        "trajectory_adapter_node",
+        "geometry_adapter_node",
+        "tracked_objects_adapter_node",
+        "prediction_node",
+        "canonical_prediction_visualizer_node",
+    }.issubset(executables)
 
 
-def test_dynamic_prediction_remains_one_integrated_node():
-    """Dynamic mode derives acceleration inside the prediction node."""
+def test_dynamic_prediction_adds_rover_state_adapter():
+    """Dynamic mode derives acceleration through the canonical adapter."""
     module = _load_launch_module()
     context = _context(
         future_path="true",
@@ -167,9 +170,7 @@ def test_dynamic_prediction_remains_one_integrated_node():
 
     actions = module.launch_setup(context)
 
-    executables = _node_executables(actions)
-    assert executables.count("path_risk_predictor_node") == 1
-    assert "rover_state_adapter_node" not in executables
+    assert "rover_state_adapter_node" in _node_executables(actions)
 
 
 def test_mavlink_live_and_missing_svo_clock_are_rejected():

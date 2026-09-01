@@ -1,0 +1,20 @@
+bool valid
+string validity_reason
+
+float64 front_moment_nm
+float64 rear_moment_nm
+float64 left_moment_nm
+float64 right_moment_nm
+
+float64 normalized_front_moment
+float64 normalized_rear_moment
+float64 normalized_left_moment
+float64 normalized_right_moment
+
+float64 minimum_stability_moment_nm
+float64 normalized_minimum_stability_moment
+string minimum_normalized_moment_edge
+
+bool acceleration_available
+bool external_wrench_available
+bool external_wrench_included
