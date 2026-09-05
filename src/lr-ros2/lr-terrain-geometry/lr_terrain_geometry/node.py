@@ -68,21 +68,27 @@ class TerrainGeometryNode(Node):
             "map",
             read_only,
         ).value
-        self._tf_timeout_sec = float(self.declare_parameter(
-            "tf.lookup_timeout_sec",
-            0.1,
-            read_only,
-        ).value)
-        self._diagnostic_period_sec = float(self.declare_parameter(
-            "diagnostics.period_sec",
-            1.0,
-            read_only,
-        ).value)
-        self._stale_after_sec = float(self.declare_parameter(
-            "diagnostics.stale_after_sec",
-            2.0,
-            read_only,
-        ).value)
+        self._tf_timeout_sec = float(
+            self.declare_parameter(
+                "tf.lookup_timeout_sec",
+                0.1,
+                read_only,
+            ).value
+        )
+        self._diagnostic_period_sec = float(
+            self.declare_parameter(
+                "diagnostics.period_sec",
+                1.0,
+                read_only,
+            ).value
+        )
+        self._stale_after_sec = float(
+            self.declare_parameter(
+                "diagnostics.stale_after_sec",
+                2.0,
+                read_only,
+            ).value
+        )
         self._heatmap_pixels_per_cell = self.declare_parameter(
             "output.heatmap_pixels_per_cell",
             24,
@@ -200,17 +206,13 @@ class TerrainGeometryNode(Node):
             ("diagnostics.stale_after_sec", self._stale_after_sec),
         ):
             if not math.isfinite(value) or value <= 0.0:
-                raise ValueError(
-                    f"{name} must be finite and greater than zero"
-                )
+                raise ValueError(f"{name} must be finite and greater than zero")
         if (
             isinstance(self._heatmap_pixels_per_cell, bool)
             or not isinstance(self._heatmap_pixels_per_cell, int)
             or not 1 <= self._heatmap_pixels_per_cell <= 64
         ):
-            raise ValueError(
-                "output.heatmap_pixels_per_cell must be an integer from 1 to 64"
-            )
+            raise ValueError("output.heatmap_pixels_per_cell must be an integer from 1 to 64")
 
     def _on_point_cloud(self, message: PointCloud2) -> None:
         callback_started = time.monotonic()
@@ -237,9 +239,7 @@ class TerrainGeometryNode(Node):
         with self._state_lock:
             self._tf_buffer.clear()
             self._estimator.reset("ROS time changed")
-            self._last_result = TerrainResult(
-                (), (), (), False, True, "ROS time changed", 0, 0
-            )
+            self._last_result = TerrainResult((), (), (), False, True, "ROS time changed", 0, 0)
             self._last_error = ""
             self._last_rover_position.fill(0.0)
             self._publish_snapshot(
@@ -247,9 +247,7 @@ class TerrainGeometryNode(Node):
                 self.get_clock().now().to_msg(),
                 self._last_rover_position,
             )
-        self.get_logger().info(
-            "ROS time changed; cleared terrain TF cache and estimator state."
-        )
+        self.get_logger().info("ROS time changed; cleared terrain TF cache and estimator state.")
 
     def _process_point_cloud(
         self,
@@ -310,9 +308,7 @@ class TerrainGeometryNode(Node):
             self._last_rover_position,
         )
         if result.reset_reason:
-            self.get_logger().warning(
-                f"Terrain state reset: {result.reset_reason}"
-            )
+            self.get_logger().warning(f"Terrain state reset: {result.reset_reason}")
         self._finish_timing(callback_started)
 
     def _record_malformed(self, reason: str) -> None:
@@ -327,15 +323,12 @@ class TerrainGeometryNode(Node):
             self._last_warn_monotonic = now
 
     def _finish_timing(self, callback_started: float) -> None:
-        self._last_processing_ms = (
-            time.monotonic() - callback_started
-        ) * 1000.0
+        self._last_processing_ms = (time.monotonic() - callback_started) * 1000.0
         if self._processing_ms_ema <= 0.0:
             self._processing_ms_ema = self._last_processing_ms
         else:
             self._processing_ms_ema = (
-                0.9 * self._processing_ms_ema
-                + 0.1 * self._last_processing_ms
+                0.9 * self._processing_ms_ema + 0.1 * self._last_processing_ms
             )
 
     def _publish_snapshot(self, result, stamp, rover_position) -> None:
@@ -346,28 +339,23 @@ class TerrainGeometryNode(Node):
             stamp,
             self._map_frame,
         )
-        markers = terrain_result_to_markers(
-            result,
-            rover_position,
-            self._config,
-            stamp,
-            self._map_frame,
-        )
-        heatmap = grid_map_to_heatmap_image(
-            grid_map,
-            self._heatmap_pixels_per_cell,
-        )
         self._grid_map_publisher.publish(grid_map)
-        self._marker_publisher.publish(markers)
-        self._heatmap_publisher.publish(heatmap)
+        if self._marker_publisher.get_subscription_count():
+            self._marker_publisher.publish(
+                terrain_result_to_markers(
+                    result, rover_position, self._config, stamp, self._map_frame
+                )
+            )
+        if self._heatmap_publisher.get_subscription_count():
+            self._heatmap_publisher.publish(
+                grid_map_to_heatmap_image(grid_map, self._heatmap_pixels_per_cell)
+            )
 
     def _on_reset(self, request, response):
         del request
         with self._state_lock:
             self._estimator.reset("manual reset")
-            self._last_result = TerrainResult(
-                (), (), (), False, True, "manual reset", 0, 0
-            )
+            self._last_result = TerrainResult((), (), (), False, True, "manual reset", 0, 0)
             self._publish_snapshot(
                 self._last_result,
                 self.get_clock().now().to_msg(),
@@ -408,11 +396,7 @@ class TerrainGeometryNode(Node):
             "input_count": self._input_count,
             "processed_count": self._processed_count,
             "average_input_hz": f"{self._input_count / elapsed:.2f}",
-            "cloud_age_sec": (
-                "inf"
-                if not math.isfinite(receive_age)
-                else f"{receive_age:.3f}"
-            ),
+            "cloud_age_sec": ("inf" if not math.isfinite(receive_age) else f"{receive_age:.3f}"),
             "processing_ms": f"{self._last_processing_ms:.2f}",
             "processing_ms_ema": f"{self._processing_ms_ema:.2f}",
             "cells": result.cell_count,
@@ -424,10 +408,7 @@ class TerrainGeometryNode(Node):
             "malformed_clouds": self._malformed_cloud_count,
             "last_reset_reason": self._estimator.last_reset_reason or "",
         }
-        status.values = [
-            KeyValue(key=str(key), value=str(value))
-            for key, value in values.items()
-        ]
+        status.values = [KeyValue(key=str(key), value=str(value)) for key, value in values.items()]
         message = DiagnosticArray()
         message.header.stamp = self.get_clock().now().to_msg()
         message.status = [status]

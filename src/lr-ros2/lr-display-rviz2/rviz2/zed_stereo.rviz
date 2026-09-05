@@ -6,7 +6,6 @@ Panels:
       Expanded:
         - /Depth1
         - /Localization1/TF1/Tree1
-        - /Body Tracking1/Bodies1
         - /ZED Mapping1/Planes1/Namespaces1
       Splitter Ratio: 0.6144927740097046
     Tree Height: 490
@@ -25,8 +24,6 @@ Panels:
     Splitter Ratio: 0.5
   - Class: lr_display_rviz2/SvoControl
     Name: SVO Playback Control
-  - Class: nav2_rviz_plugins/Navigation 2
-    Name: Navigation 2
 Visualization Manager:
   Class: ""
   Displays:
@@ -440,50 +437,6 @@ Visualization Manager:
           Value: false
       Enabled: true
       Name: Localization
-    - Class: rviz_common/Group
-      Displays:
-        - Class: rviz_plugin_zed_od/ZedOdDisplay
-          Enabled: true
-          Joint Radius: 0.10000000149011612
-          Label Scale: 3
-          Link Size: 0.05000000074505806
-          Name: Objects
-          Show Bounding Boxes: true
-          Show Labels: true
-          Show Skeletons: true
-          Topic:
-            Depth: 5
-            Durability Policy: Volatile
-            Filter size: 10
-            History Policy: Keep Last
-            Reliability Policy: Reliable
-            Value: /zed/zed_node/obj_det/objects
-          Transparency: 0.25
-          Value: true
-      Enabled: true
-      Name: Object Detection
-    - Class: rviz_common/Group
-      Displays:
-        - Class: rviz_plugin_zed_od/ZedOdDisplay
-          Enabled: true
-          Joint Radius: 0.10000000149011612
-          Label Scale: 3
-          Link Size: 0.02500000037252903
-          Name: Bodies
-          Show Bounding Boxes: false
-          Show Labels: true
-          Show Skeletons: true
-          Topic:
-            Depth: 5
-            Durability Policy: Volatile
-            Filter size: 10
-            History Policy: Keep Last
-            Reliability Policy: Reliable
-            Value: /zed/zed_node/body_trk/skeletons
-          Transparency: 0.25
-          Value: true
-      Enabled: true
-      Name: Body Tracking
     - Class: rviz_common/Group
       Displays:
         - Alpha: 0.9

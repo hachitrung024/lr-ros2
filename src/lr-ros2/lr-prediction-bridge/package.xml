@@ -14,12 +14,13 @@
   <buildtool_depend>ament_python</buildtool_depend>
 
   <exec_depend>rclpy</exec_depend>
+  <exec_depend>diagnostic_msgs</exec_depend>
+  <exec_depend>lr_terrain_geometry</exec_depend>
   <exec_depend>std_msgs</exec_depend>
   <exec_depend>geometry_msgs</exec_depend>
   <exec_depend>nav_msgs</exec_depend>
   <exec_depend>grid_map_msgs</exec_depend>
   <exec_depend>builtin_interfaces</exec_depend>
-  <exec_depend>message_filters</exec_depend>
   <exec_depend>safety_perception_msgs</exec_depend>
   <exec_depend>vision_msgs</exec_depend>
   <exec_depend>tf2_ros</exec_depend>

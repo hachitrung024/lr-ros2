@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import rclpy
+import time
+
+from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
@@ -66,18 +69,17 @@ class SegmentationNode(Node):
             self._on_image,
             image_qos,
         )
-        self.get_logger().info(
-            f"RGB={image_topic}; overlay=~/overlay; mask=~/instance_mask"
-        )
+        self._processing_ms = 0.0
+        self._diagnostics = self.create_publisher(DiagnosticArray, "/diagnostics", 10)
+        self._diagnostic_timer = self.create_timer(1.0, self._publish_diagnostics)
+        self.get_logger().info(f"RGB={image_topic}; overlay=~/overlay; mask=~/instance_mask")
 
     def _on_image(self, message: Image) -> None:
+        started = time.monotonic()
         try:
             image_bgr = image_message_to_bgr(message)
-            prediction = self._model.predict(image_bgr)
-            overlay = bgr_to_image_message(
-                prediction.overlay_bgr,
-                message.header,
-            )
+            render_overlay = self._overlay_publisher.get_subscription_count() > 0
+            prediction = self._model.predict(image_bgr, render_overlay=render_overlay)
             mask = labels_to_image_message(
                 prediction.instance_labels,
                 message.header,
@@ -86,8 +88,25 @@ class SegmentationNode(Node):
             self.get_logger().error(f"Segmentation failed: {error}")
             return
 
-        self._overlay_publisher.publish(overlay)
         self._mask_publisher.publish(mask)
+        if render_overlay and prediction.overlay_bgr is not None:
+            self._overlay_publisher.publish(
+                bgr_to_image_message(prediction.overlay_bgr, message.header)
+            )
+        self._processing_ms = (time.monotonic() - started) * 1000.0
+
+    def _publish_diagnostics(self):
+        message = DiagnosticArray()
+        message.header.stamp = self.get_clock().now().to_msg()
+        message.status = [
+            DiagnosticStatus(
+                name=self.get_name(),
+                level=DiagnosticStatus.OK,
+                message="segmentation",
+                values=[KeyValue(key="callback_ms", value=str(self._processing_ms))],
+            )
+        ]
+        self._diagnostics.publish(message)
 
 
 def main(args=None) -> None:

@@ -34,6 +34,7 @@ class PredictionSnapshot:
     geometry_source_trajectory_stamp: float | None
     external_wrenches: list[ExternalWrenchData] | None
     external_wrenches_frame_id: str | None
+    objects_timestamp: float | None = None
 
 
 class PredictionInputCache:
@@ -57,6 +58,7 @@ class PredictionInputCache:
         self._geometry: list[GeometryStep] | None = None
         self._state: RoverState | None = None
         self._objects_frame_id: str | None = None
+        self._objects_timestamp: float | None = None
         self._geometry_frame_id: str | None = None
         self._state_frame_id: str | None = None
         self._geometry_source_trajectory_id: int | None = None
@@ -67,10 +69,13 @@ class PredictionInputCache:
     def set_trajectory(self, trajectory: Trajectory, *, trajectory_id: int | None = None) -> None:
         with self._lock:
             self._trajectory = trajectory
-            self._trajectory_id = int(trajectory.timestamp) if trajectory_id is None else int(trajectory_id)
+            self._trajectory_id = (
+                int(trajectory.timestamp) if trajectory_id is None else int(trajectory_id)
+            )
             self._objects = None
             self._geometry = None
             self._objects_frame_id = None
+            self._objects_timestamp = None
             self._geometry_frame_id = None
             self._geometry_source_trajectory_id = None
             self._geometry_source_trajectory_stamp = None
@@ -87,11 +92,13 @@ class PredictionInputCache:
         *,
         frame_id: str,
         source_trajectory_stamp: float | None = None,
+        timestamp: float | None = None,
     ) -> None:
         del source_trajectory_stamp  # accepted for API compatibility; objects are cycle-cleared
         with self._lock:
             self._objects = objects
             self._objects_frame_id = frame_id
+            self._objects_timestamp = timestamp
 
     def set_geometry(
         self,
@@ -135,6 +142,7 @@ class PredictionInputCache:
                 geometry=self._geometry,
                 state=self._state,
                 objects_frame_id=self._objects_frame_id,
+                objects_timestamp=self._objects_timestamp,
                 geometry_frame_id=self._geometry_frame_id,
                 state_frame_id=self._state_frame_id,
                 geometry_source_trajectory_id=self._geometry_source_trajectory_id,
@@ -142,3 +150,20 @@ class PredictionInputCache:
                 external_wrenches=self._external_wrenches,
                 external_wrenches_frame_id=self._external_wrenches_frame_id,
             )
+
+    def reset(self) -> None:
+        """Discard every sample from the old replay timeline."""
+        with self._lock:
+            self._trajectory = None
+            self._trajectory_id = None
+            self._objects = None
+            self._objects_frame_id = None
+            self._objects_timestamp = None
+            self._geometry = None
+            self._geometry_frame_id = None
+            self._geometry_source_trajectory_id = None
+            self._geometry_source_trajectory_stamp = None
+            self._state = None
+            self._state_frame_id = None
+            self._external_wrenches = None
+            self._external_wrenches_frame_id = None

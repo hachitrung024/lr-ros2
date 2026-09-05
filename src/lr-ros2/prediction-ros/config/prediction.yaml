@@ -10,7 +10,7 @@ prediction_node:
     # static | dynamic — maps to PredictionProfile
     prediction_profile: static
     require_full_geometry_coverage: false
-    max_object_age_sec: -1.0
-    max_geometry_age_sec: -1.0
-    max_state_age_sec: -1.0
+    max_object_age_sec: 0.5
+    max_geometry_age_sec: 2.0
+    max_state_age_sec: 0.25
     reuse_latest_inputs_per_cycle: true

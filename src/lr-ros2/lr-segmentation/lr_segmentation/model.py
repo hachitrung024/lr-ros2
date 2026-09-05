@@ -13,7 +13,7 @@ import numpy as np
 class SegmentationPrediction:
     """Rendered overlay and source-resolution instance labels."""
 
-    overlay_bgr: np.ndarray
+    overlay_bgr: np.ndarray | None
     instance_labels: np.ndarray
 
 
@@ -100,9 +100,7 @@ class UltralyticsSegmentationModel:
         try:
             from ultralytics import YOLO
         except ImportError as error:
-            raise RuntimeError(
-                "Ultralytics is not installed; install requirements.txt"
-            ) from error
+            raise RuntimeError("Ultralytics is not installed; install requirements.txt") from error
 
         self._model = YOLO(str(path.resolve()))
         self._arguments = {
@@ -113,12 +111,14 @@ class UltralyticsSegmentationModel:
             "verbose": False,
         }
 
-    def predict(self, image_bgr: np.ndarray) -> SegmentationPrediction:
+    def predict(
+        self, image_bgr: np.ndarray, *, render_overlay: bool = True
+    ) -> SegmentationPrediction:
         """Run inference and return its overlay and instance-label image."""
         result = self._model.predict(source=image_bgr, **self._arguments)[0]
         height, width = image_bgr.shape[:2]
         return SegmentationPrediction(
-            np.asarray(result.plot(), dtype=np.uint8),
+            np.asarray(result.plot(), dtype=np.uint8) if render_overlay else None,
             _instance_labels(result, height, width),
         )
 

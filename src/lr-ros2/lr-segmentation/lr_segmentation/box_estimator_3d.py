@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
+import time
+
+from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
+from .image_pair_buffer import ImagePairBuffer
 
 import numpy as np
 import rclpy
@@ -76,9 +80,13 @@ def instance_mask_message_to_labels(message: Image) -> np.ndarray:
     ).reshape(height, int(message.step))
     packed = np.ascontiguousarray(rows[:, :packed_width])
     byte_order = ">u2" if bool(message.is_bigendian) else "<u2"
-    return packed.view(byte_order).reshape(height, width).astype(
-        np.uint16,
-        copy=False,
+    return (
+        packed.view(byte_order)
+        .reshape(height, width)
+        .astype(
+            np.uint16,
+            copy=False,
+        )
     )
 
 
@@ -244,11 +252,7 @@ class BoxTracker:
             self._tracks.append(track)
             updated_tracks.append(track)
 
-        self._tracks = [
-            track
-            for track in self._tracks
-            if track.missed <= self._max_missed_frames
-        ]
+        self._tracks = [track for track in self._tracks if track.missed <= self._max_missed_frames]
         return [
             TrackedBox(
                 track_id=track.track_id,
@@ -296,9 +300,7 @@ class BoxEstimator3DNode(Node):
             "output.marker_topic",
             "/segmentation/box_markers",
         ).value
-        self._output_frame = str(
-            self.declare_parameter("output.frame_id", "").value
-        ).strip()
+        self._output_frame = str(self.declare_parameter("output.frame_id", "").value).strip()
         self._up_axis = np.asarray(
             self.declare_parameter(
                 "geometry.up_axis",
@@ -307,15 +309,10 @@ class BoxEstimator3DNode(Node):
             dtype=np.float64,
         )
         self._sync_tolerance_ns = int(
-            float(self.declare_parameter("sync_tolerance_sec", 0.05).value)
-            * 1_000_000_000
+            float(self.declare_parameter("sync_tolerance_sec", 0.05).value) * 1_000_000_000
         )
-        self._minimum_depth_m = float(
-            self.declare_parameter("minimum_depth_m", 0.2).value
-        )
-        self._maximum_depth_m = float(
-            self.declare_parameter("maximum_depth_m", 20.0).value
-        )
+        self._minimum_depth_m = float(self.declare_parameter("minimum_depth_m", 0.2).value)
+        self._maximum_depth_m = float(self.declare_parameter("maximum_depth_m", 20.0).value)
         self._sampling_stride = self.declare_parameter(
             "sampling_stride",
             2,
@@ -328,32 +325,20 @@ class BoxEstimator3DNode(Node):
             "minimum_points_per_instance",
             64,
         ).value
-        self._depth_mad_scale = float(
-            self.declare_parameter("depth_mad_scale", 8.0).value
-        )
+        self._depth_mad_scale = float(self.declare_parameter("depth_mad_scale", 8.0).value)
         self._minimum_depth_band_m = float(
             self.declare_parameter("minimum_depth_band_m", 0.15).value
         )
-        self._trim_fraction = float(
-            self.declare_parameter("box.trim_fraction", 0.02).value
-        )
-        self._minimum_box_size_m = float(
-            self.declare_parameter("box.minimum_size_m", 0.05).value
-        )
+        self._trim_fraction = float(self.declare_parameter("box.trim_fraction", 0.02).value)
+        self._minimum_box_size_m = float(self.declare_parameter("box.minimum_size_m", 0.05).value)
         self._box_marker_line_width_m = float(
-            self.declare_parameter(
-                "visualization.box_line_width_m", 0.07
-            ).value
+            self.declare_parameter("visualization.box_line_width_m", 0.07).value
         )
         self._box_marker_fill_alpha = float(
-            self.declare_parameter(
-                "visualization.box_fill_alpha", 0.12
-            ).value
+            self.declare_parameter("visualization.box_fill_alpha", 0.12).value
         )
         self._box_marker_label_scale_m = float(
-            self.declare_parameter(
-                "visualization.label_scale_m", 0.28
-            ).value
+            self.declare_parameter("visualization.label_scale_m", 0.28).value
         )
         self._validate_parameters()
         self._tracker = BoxTracker(
@@ -437,9 +422,19 @@ class BoxEstimator3DNode(Node):
             if self._tf_buffer is not None
             else None
         )
-        self._pending_mask = None
-        self._pending_depth = None
+        self._pairs = ImagePairBuffer(
+            self._sync_tolerance_ns,
+            max_samples=int(self.declare_parameter("sync_buffer.max_samples", 30).value),
+            max_age_ns=round(
+                float(self.declare_parameter("sync_buffer.max_age_sec", 1.0).value) * 1e9
+            ),
+        )
         self._camera_info = None
+        self._processing_ms = 0.0
+        self._published_boxes = 0
+        self._tf_failures = 0
+        self._diagnostics = self.create_publisher(DiagnosticArray, "/diagnostics", 10)
+        self._diagnostic_timer = self.create_timer(1.0, self._publish_diagnostics)
         # Humble's Python TF buffer does not clear itself when /clock jumps
         # backwards. SVO seek creates exactly that jump, so reset every state
         # that depends on the old timeline ourselves.
@@ -493,9 +488,7 @@ class BoxEstimator3DNode(Node):
             self._box_marker_line_width_m,
         )
         if not 0.0 <= self._box_marker_fill_alpha <= 1.0:
-            raise ValueError(
-                "visualization.box_fill_alpha must be in [0, 1]"
-            )
+            raise ValueError("visualization.box_fill_alpha must be in [0, 1]")
         _require_positive(
             "visualization.label_scale_m",
             self._box_marker_label_scale_m,
@@ -503,11 +496,11 @@ class BoxEstimator3DNode(Node):
         self._up_axis = _unit_vector(self._up_axis, "geometry.up_axis")
 
     def _on_mask(self, message: Image) -> None:
-        self._pending_mask = message
+        self._pairs.add("mask", message)
         self._try_estimate()
 
     def _on_depth(self, message: Image) -> None:
-        self._pending_depth = message
+        self._pairs.add("depth", message)
         self._try_estimate()
 
     def _on_camera_info(self, message: CameraInfo) -> None:
@@ -516,20 +509,20 @@ class BoxEstimator3DNode(Node):
 
     def _on_time_jump(self, _time_jump) -> None:
         """Reset state after SVO seek or a ROS time-source change."""
-        self._pending_mask = None
-        self._pending_depth = None
+        self._pairs.reset()
         self._tracker.reset()
+        self._published_boxes = 0
+        self._tf_failures = 0
+        self._processing_ms = 0.0
         if self._tf_buffer is not None:
             self._tf_buffer.clear()
 
-        empty_detections = Detection3DArray()
-        empty_detections.header.frame_id = self._output_frame
-        empty_detections.header.stamp = self.get_clock().now().to_msg()
-        self._box_publisher.publish(empty_detections)
-
+        # A reset is not an observation of free space. Only clear presentation;
+        # the prediction runtime waits for a measured batch on the new timeline.
         markers = MarkerArray()
         clear = Marker()
-        clear.header = empty_detections.header
+        clear.header.frame_id = self._output_frame
+        clear.header.stamp = self.get_clock().now().to_msg()
         clear.action = Marker.DELETEALL
         markers.markers.append(clear)
         self._marker_publisher.publish(markers)
@@ -538,26 +531,17 @@ class BoxEstimator3DNode(Node):
         )
 
     def _try_estimate(self) -> None:
-        if (
-            self._pending_mask is None
-            or self._pending_depth is None
-            or self._camera_info is None
-        ):
+        if self._camera_info is None:
             return
-        difference = _stamp_nanoseconds(self._pending_mask) - _stamp_nanoseconds(
-            self._pending_depth
-        )
-        if abs(difference) > self._sync_tolerance_ns:
-            if difference < 0:
-                self._pending_mask = None
-            else:
-                self._pending_depth = None
-            return
+        while True:
+            pair = self._pairs.pop_pair()
+            if pair is None:
+                return
+            started = time.monotonic()
+            self._estimate_pair(*pair)
+            self._processing_ms = (time.monotonic() - started) * 1000.0
 
-        mask_message = self._pending_mask
-        depth_message = self._pending_depth
-        self._pending_mask = None
-        self._pending_depth = None
+    def _estimate_pair(self, mask_message, depth_message) -> None:
         try:
             labels = instance_mask_message_to_labels(mask_message)
             depth_m = depth_message_to_meters(depth_message)
@@ -570,6 +554,7 @@ class BoxEstimator3DNode(Node):
             self.get_logger().error(f"3D box estimation failed: {error}")
             return
         except TransformException as error:
+            self._tf_failures += 1
             self.get_logger().warning(
                 f"3D box transform unavailable: {error}",
                 throttle_duration_sec=2.0,
@@ -581,13 +566,40 @@ class BoxEstimator3DNode(Node):
             _stamp_seconds(header),
         )
         self._box_publisher.publish(_detection_array(header, tracked_boxes))
-        self._marker_publisher.publish(_marker_array(
-            header,
-            tracked_boxes,
-            line_width_m=self._box_marker_line_width_m,
-            fill_alpha=self._box_marker_fill_alpha,
-            label_scale_m=self._box_marker_label_scale_m,
-        ))
+        self._published_boxes += 1
+        if self._marker_publisher.get_subscription_count():
+            self._marker_publisher.publish(
+                _marker_array(
+                    header,
+                    tracked_boxes,
+                    line_width_m=self._box_marker_line_width_m,
+                    fill_alpha=self._box_marker_fill_alpha,
+                    label_scale_m=self._box_marker_label_scale_m,
+                )
+            )
+
+    def _publish_diagnostics(self) -> None:
+        message = DiagnosticArray()
+        message.header.stamp = self.get_clock().now().to_msg()
+        message.status = [
+            DiagnosticStatus(
+                name=self.get_name(),
+                level=DiagnosticStatus.OK,
+                message="mask-depth synchronization",
+                values=[
+                    KeyValue(key=key, value=str(value))
+                    for key, value in {
+                        "masks_received": self._pairs.mask_count,
+                        "matched_pairs": self._pairs.pair_count,
+                        "dropped_masks": self._pairs.dropped_masks,
+                        "boxes_published": self._published_boxes,
+                        "tf_failures": self._tf_failures,
+                        "callback_ms": self._processing_ms,
+                    }.items()
+                ],
+            )
+        ]
+        self._diagnostics.publish(message)
 
     def _measure_boxes(
         self,
@@ -597,10 +609,10 @@ class BoxEstimator3DNode(Node):
     ) -> tuple[list[BoxMeasurement], Header]:
         if labels.shape != depth_m.shape:
             raise ValueError("instance mask and registered depth sizes differ")
-        if (
-            self._camera_info.width not in {0, labels.shape[1]}
-            or self._camera_info.height not in {0, labels.shape[0]}
-        ):
+        if self._camera_info.width not in {0, labels.shape[1]} or self._camera_info.height not in {
+            0,
+            labels.shape[0],
+        }:
             raise ValueError("CameraInfo dimensions differ from mask and depth")
         output_header, rotation, translation = self._output_transform(header)
         measurements = []
@@ -703,11 +715,13 @@ def _instance_points(
         depth = depth[selected]
     pixel_v = rows.astype(np.float64) * sampling_stride
     pixel_u = columns.astype(np.float64) * sampling_stride
-    return np.column_stack((
-        (pixel_u - cx) * depth / fx,
-        (pixel_v - cy) * depth / fy,
-        depth,
-    ))
+    return np.column_stack(
+        (
+            (pixel_u - cx) * depth / fx,
+            (pixel_v - cy) * depth / fy,
+            depth,
+        )
+    )
 
 
 def _depth_inlier_mask(
@@ -770,10 +784,7 @@ def _associate_tracks(
     matched_measurements = set()
     matches = []
     for _, track_index, measurement_index in candidates:
-        if (
-            track_index in matched_tracks
-            or measurement_index in matched_measurements
-        ):
+        if track_index in matched_tracks or measurement_index in matched_measurements:
             continue
         matched_tracks.add(track_index)
         matched_measurements.add(measurement_index)
@@ -825,20 +836,13 @@ def _update_track(
 ) -> None:
     """Correct one track from a current OBB measurement."""
     innovation = measurement.center - track.state[:3]
-    residual_covariance = track.covariance[:3, :3] + (
-        np.eye(3) * measurement_variance
-    )
+    residual_covariance = track.covariance[:3, :3] + (np.eye(3) * measurement_variance)
     gain = track.covariance[:, :3] @ np.linalg.inv(residual_covariance)
     track.state = track.state + gain @ innovation
     observation = np.zeros((3, 6))
     observation[:, :3] = np.eye(3)
-    track.covariance = (
-        np.eye(6) - gain @ observation
-    ) @ track.covariance
-    track.size = (
-        (1.0 - size_smoothing) * track.size
-        + size_smoothing * measurement.size
-    )
+    track.covariance = (np.eye(6) - gain @ observation) @ track.covariance
+    track.size = (1.0 - size_smoothing) * track.size + size_smoothing * measurement.size
     track.orientation = _nlerp_quaternion(
         track.orientation,
         measurement.orientation,
@@ -926,15 +930,9 @@ def _marker_array(
         label.id = box.track_id * 3 + 2
         label.type = Marker.TEXT_VIEW_FACING
         label.action = Marker.ADD
-        label.pose.position.x = float(
-            box.center[0] + rotation[0, 2] * (box.size[2] * 0.5 + 0.15)
-        )
-        label.pose.position.y = float(
-            box.center[1] + rotation[1, 2] * (box.size[2] * 0.5 + 0.15)
-        )
-        label.pose.position.z = float(
-            box.center[2] + rotation[2, 2] * (box.size[2] * 0.5 + 0.15)
-        )
+        label.pose.position.x = float(box.center[0] + rotation[0, 2] * (box.size[2] * 0.5 + 0.15))
+        label.pose.position.y = float(box.center[1] + rotation[1, 2] * (box.size[2] * 0.5 + 0.15))
+        label.pose.position.z = float(box.center[2] + rotation[2, 2] * (box.size[2] * 0.5 + 0.15))
         label.pose.orientation.w = 1.0
         label.scale.z = label_scale_m
         label.color.r = red
@@ -948,9 +946,7 @@ def _marker_array(
 
 def _box_wireframe_points(size: np.ndarray) -> list[Point]:
     """Return the twelve local-space edges of an oriented box."""
-    half_x, half_y, half_z = (
-        float(value) * 0.5 for value in size
-    )
+    half_x, half_y, half_z = (float(value) * 0.5 for value in size)
     corners = (
         (-half_x, -half_y, -half_z),
         (half_x, -half_y, -half_z),
@@ -962,9 +958,18 @@ def _box_wireframe_points(size: np.ndarray) -> list[Point]:
         (-half_x, half_y, half_z),
     )
     edge_indices = (
-        (0, 1), (1, 2), (2, 3), (3, 0),
-        (4, 5), (5, 6), (6, 7), (7, 4),
-        (0, 4), (1, 5), (2, 6), (3, 7),
+        (0, 1),
+        (1, 2),
+        (2, 3),
+        (3, 0),
+        (4, 5),
+        (5, 6),
+        (6, 7),
+        (7, 4),
+        (0, 4),
+        (1, 5),
+        (2, 6),
+        (3, 7),
     )
     return [
         Point(x=corners[index][0], y=corners[index][1], z=corners[index][2])
@@ -1038,11 +1043,13 @@ def _quaternion_to_matrix(quaternion) -> np.ndarray:
     else:
         values = quaternion
     x, y, z, w = _normalized_quaternion(values)
-    return np.asarray([
-        [1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y - z * w), 2.0 * (x * z + y * w)],
-        [2.0 * (x * y + z * w), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z - x * w)],
-        [2.0 * (x * z - y * w), 2.0 * (y * z + x * w), 1.0 - 2.0 * (x * x + y * y)],
-    ])
+    return np.asarray(
+        [
+            [1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y - z * w), 2.0 * (x * z + y * w)],
+            [2.0 * (x * y + z * w), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z - x * w)],
+            [2.0 * (x * z - y * w), 2.0 * (y * z + x * w), 1.0 - 2.0 * (x * x + y * y)],
+        ]
+    )
 
 
 def _quaternion_from_matrix(matrix: np.ndarray) -> np.ndarray:
@@ -1053,38 +1060,46 @@ def _quaternion_from_matrix(matrix: np.ndarray) -> np.ndarray:
     trace = float(np.trace(values))
     if trace > 0.0:
         scale = math.sqrt(trace + 1.0) * 2.0
-        quaternion = np.asarray([
-            (values[2, 1] - values[1, 2]) / scale,
-            (values[0, 2] - values[2, 0]) / scale,
-            (values[1, 0] - values[0, 1]) / scale,
-            0.25 * scale,
-        ])
+        quaternion = np.asarray(
+            [
+                (values[2, 1] - values[1, 2]) / scale,
+                (values[0, 2] - values[2, 0]) / scale,
+                (values[1, 0] - values[0, 1]) / scale,
+                0.25 * scale,
+            ]
+        )
     else:
         index = int(np.argmax(np.diag(values)))
         if index == 0:
             scale = math.sqrt(1.0 + values[0, 0] - values[1, 1] - values[2, 2]) * 2.0
-            quaternion = np.asarray([
-                0.25 * scale,
-                (values[0, 1] + values[1, 0]) / scale,
-                (values[0, 2] + values[2, 0]) / scale,
-                (values[2, 1] - values[1, 2]) / scale,
-            ])
+            quaternion = np.asarray(
+                [
+                    0.25 * scale,
+                    (values[0, 1] + values[1, 0]) / scale,
+                    (values[0, 2] + values[2, 0]) / scale,
+                    (values[2, 1] - values[1, 2]) / scale,
+                ]
+            )
         elif index == 1:
             scale = math.sqrt(1.0 + values[1, 1] - values[0, 0] - values[2, 2]) * 2.0
-            quaternion = np.asarray([
-                (values[0, 1] + values[1, 0]) / scale,
-                0.25 * scale,
-                (values[1, 2] + values[2, 1]) / scale,
-                (values[0, 2] - values[2, 0]) / scale,
-            ])
+            quaternion = np.asarray(
+                [
+                    (values[0, 1] + values[1, 0]) / scale,
+                    0.25 * scale,
+                    (values[1, 2] + values[2, 1]) / scale,
+                    (values[0, 2] - values[2, 0]) / scale,
+                ]
+            )
         else:
             scale = math.sqrt(1.0 + values[2, 2] - values[0, 0] - values[1, 1]) * 2.0
-            quaternion = np.asarray([
-                (values[0, 2] + values[2, 0]) / scale,
-                (values[1, 2] + values[2, 1]) / scale,
-                0.25 * scale,
-                (values[1, 0] - values[0, 1]) / scale,
-            ])
+            quaternion = np.asarray(
+                [
+                    (values[0, 2] + values[2, 0]) / scale,
+                    (values[1, 2] + values[2, 1]) / scale,
+                    0.25 * scale,
+                    (values[1, 0] - values[0, 1]) / scale,
+                ]
+            )
     return _normalized_quaternion(quaternion)
 
 

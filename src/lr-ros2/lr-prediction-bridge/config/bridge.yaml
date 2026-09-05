@@ -1,9 +1,33 @@
+prediction_bridge_node:
+  ros__parameters:
+    prediction_profile: static
+    expected_frame_id: map
+    trajectory.input_topic: /lr/future_path/ground_truth
+    trajectory.output_topic: /trajectory
+    trajectory.horizon_steps: 20
+    trajectory.path_stride: 1
+    trajectory.output_dt_sec: 0.25
+    trajectory.min_distance_from_start_m: 1.0
+    trajectory.minimum_cycle_period_sec: 0.25
+    geometry.grid_map_topic: /terrain_geometry/grid_map
+    geometry.output_topic: /geometry
+    geometry.allow_flat_fallback: false
+    geometry.max_geometry_age_sec: 2.0
+    tracked_objects.input_topic: /segmentation/boxes_3d
+    tracked_objects.output_topic: /tracked_objects
+    tracked_objects.tf_timeout_sec: 0.2
+    rover_state.pose_topic: /lr/mavlink/pose
+    rover_state.output_topic: /rover/state
+    rover_state.min_dt_sec: 0.001
+    rover_state.max_dt_sec: 1.0
+
+# Compatibility executables use the same converters.
 trajectory_adapter_node:
   ros__parameters:
     input_topic: /lr/future_path/ground_truth
     output_topic: /trajectory
     expected_frame_id: map
-    force_frame_id_map: true
+    force_frame_id_map: false
     horizon_steps: 20
     path_stride: 1
     output_dt_sec: 0.25
@@ -16,7 +40,7 @@ geometry_adapter_node:
     grid_map_topic: /terrain_geometry/grid_map
     output_topic: /geometry
     expected_frame_id: map
-    force_frame_id_map: true
+    force_frame_id_map: false
     allow_flat_fallback: false
 
 rover_state_adapter_node:
@@ -24,7 +48,7 @@ rover_state_adapter_node:
     pose_topic: /lr/mavlink/pose
     output_topic: /rover/state
     expected_frame_id: map
-    force_frame_id_map: true
+    force_frame_id_map: false
 
 empty_objects_bridge_node:
   ros__parameters:

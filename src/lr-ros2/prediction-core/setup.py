@@ -19,6 +19,7 @@ setup(
     ],
     install_requires=["setuptools"],
     zip_safe=True,
+    extras_require={"test": ["pytest"]},
     maintainer="Landfill Rover Team",
     maintainer_email="dev@example.com",
     description="ROS-independent collision and rollover prediction engine",

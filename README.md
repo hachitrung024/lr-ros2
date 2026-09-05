@@ -38,9 +38,7 @@ from the MAVLink database. The SVO VIO pose-cache pass is therefore skipped.
 
 ## Canonical prediction pipeline
 
-The complete runtime Prediction implementation from the provided
-`prediction-rover` source is now integrated as normal ROS 2 packages under
-`src/lr-ros2`:
+Prediction is built as normal ROS 2 packages under `src/lr-ros2`.
 
 | Package | Responsibility |
 |---|---|
@@ -50,9 +48,15 @@ The complete runtime Prediction implementation from the provided
 | `lr_prediction_bridge` | Adapters from LR pipeline messages to canonical messages |
 | `lr_path_prediction` | Diagnostic and RViz presentation of canonical output |
 
-The top-level `prediction-rover/` directory is reference source only and is
-ignored by `colcon`. It may be removed after this integration without changing
-the build or runtime pipeline.
+The dynamic display pipeline has seven LR application nodes: `mavlink_pose`,
+`segmentation`, `box_estimator_3d`, `terrain_geometry`,
+`prediction_bridge_node`, `prediction_node`, and
+`canonical_prediction_visualizer`. ZED, its component container, robot state
+publisher, and optional RViz are additional infrastructure.
+
+One `prediction_bridge_node` handles the four conversions below. Geometry is
+sampled directly from the trajectory in that process. The four old adapter
+executables remain available for standalone use and share the same converters.
 
 The adapters perform these conversions:
 
@@ -79,9 +83,11 @@ node derives only UI warnings from that evidence:
 - orange/red points for configured slope display thresholds; only the nearest
   actual intersection is highlighted in magenta.
 
-Steps outside the current terrain GridMap remain gray. Current segmentation
-does not provide persistent tracks or object velocity, so detected objects are
-treated as static within each prediction cycle.
+Steps outside the current terrain GridMap remain gray. The box estimator has
+Kalman tracking with persistent numeric IDs until its tracker resets. Its
+`Detection3DArray` output has no object velocity, so `velocity_valid` stays false
+and objects are treated as static within each prediction cycle. Class/score
+metadata is currently `unknown`/1.0 in that box output, not the YOLO class score.
 
 The raw engine also reports objects within `collision_margin_m` as collision
 candidates. A positive-clearance candidate does not add `!` or change the RViz
@@ -107,7 +113,18 @@ colcon build --symlink-install \
 source install/setup.bash
 ```
 
-No installation from `prediction-rover/` is required.
+Run `source install/setup.bash` again after rebuilding new executables.
+For pause/resume with the default `svo_realtime:=true`, build the existing
+ZED SDK 5.4 realtime-pause patch once:
+
+```bash
+CMAKE_BUILD_PARALLEL_LEVEL=2 bash scripts/build_zed_realtime_pause.sh
+source install/setup.bash
+```
+
+This script restores the wrapper source after building the patched component.
+The stereo RViz preset uses the LR overlay/boxes/markers and SVO control panel;
+it does not require the unused ZED object/body display or Nav2 panel plugins.
 
 ## Rover configuration
 
@@ -122,6 +139,86 @@ prediction_rover_config:=/path/to/rover.yaml
 `prediction_params_file` configures only diagnostic/RViz presentation, such as
 slope thresholds and marker dimensions. It does not configure the physics
 model.
+
+## Replay configuration and synchronization
+
+The original full command remains valid. To run without the RViz process, add
+`start_rviz:=false`. Overlays, heatmaps, and markers are generated only when
+subscribed; masks, boxes, GridMap and raw prediction remain available.
+
+| Launch argument | Owns |
+|---|---|
+| `bridge_params_file` | Bridge input/output topics and trajectory sampling |
+| `prediction_runtime_params_file` | Runtime input age limits and readiness |
+| `prediction_params_file` | Diagnostics/RViz presentation |
+| `prediction_rover_config` | Rover physics parameters |
+
+YAML is loaded first; explicit launch topic/frame/profile/time settings override
+it. The display launch includes the same `lr_path_prediction` launch used for
+standalone prediction. The bridge YAML uses the `prediction_bridge_node` section
+and role prefixes (`trajectory.*`, `geometry.*`, `tracked_objects.*`,
+`rover_state.*`); old adapter sections remain for compatibility.
+
+Default replay age limits relative to the trajectory timestamp are objects
+0.5 s, GridMap 2 s and rover state 0.25 s. An empty object batch retains its
+measurement timestamp and expires too. Future measurements cannot complete a
+cycle. `/geometry.header.stamp` is the GridMap sensor timestamp;
+`source_trajectory_stamp` and `source_trajectory_id` identify its trajectory.
+Set the bridge `geometry.max_geometry_age_sec` and runtime
+`max_geometry_age_sec` together when changing terrain age limits.
+
+Path, pose and GridMap frames must match `expected_frame_id`; the compatibility
+`force_frame_id_map` parameter no longer relabels coordinates. Boxes in other
+frames use timestamped TF, retried without blocking up to `tf_timeout_sec`.
+Missing/invalid TF or malformed detections do not become an empty observation.
+
+Mask/depth synchronization retains at most 30 messages per stream and 1 s of
+source time (`sync_buffer.max_samples`, `sync_buffer.max_age_sec`), pairing the
+nearest available timestamps within `sync_tolerance_sec` (50 ms). Each message
+is consumed at most once. Rewinding SVO or changing the time source clears
+buffers, terrain, tracking, bridge and runtime caches. Bridge trajectory IDs
+continue increasing after rewind. Pausing leaves the simulation clock still.
+Reset clears presentation without emitting a synthetic empty objects batch;
+prediction waits for a new measured observation.
+
+`/prediction/diagnostics` reports missing, future or stale runtime inputs and
+callback time. Perception timing and mask/depth pairing counters are on
+`/diagnostics`. Prediction visualization clears warnings while runtime reports
+unavailable evidence or an expired trajectory.
+
+## Validation and replay measurement
+
+Tests are selected per package to avoid same-name pytest modules across packages:
+
+```bash
+colcon test --packages-select prediction_core prediction_ros lr_prediction_bridge \
+  lr_segmentation lr_terrain_geometry lr_path_prediction lr_display_rviz2
+colcon test-result --verbose
+```
+
+The replay observer records 60 SVO seconds after a 10-second warmup and shuts
+down its own launch process group:
+
+```bash
+python3 scripts/benchmark_prediction.py \
+  --output log/prediction-benchmark \
+  --svo /workspace/svo/zed_20260710_092420_0001.svo2 \
+  --model models/best.pt
+```
+
+To verify the original display command with RViz, including pause/resume and
+rewind through the ZED services:
+
+```bash
+python3 scripts/verify_prediction_replay.py \
+  --svo /workspace/svo/zed_20260710_092420_0001.svo2
+```
+
+Reports include observed topic counts, completed cycles, simulated-time latency,
+per-process CPU/RSS and GPU memory/utilization. The observer subscribes to masks
+and boxes, but not debug images/markers. Callback timing and pairing diagnostics
+are recorded when published by that version. See
+[refactor measurements](docs/prediction-refactor.md) for the measured comparison.
 
 ## Main outputs
 

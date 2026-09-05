@@ -143,13 +143,15 @@ class PredictionRuntime:
             self._logger(message)
         return self._after_update(extra_messages=tuple(messages))
 
-    def on_objects(self, objects: list[TrackedObject], *, frame_id: str) -> RuntimeResult:
+    def on_objects(
+        self, objects: list[TrackedObject], *, frame_id: str, timestamp: float | None = None
+    ) -> RuntimeResult:
         message = (
             f"received objects batch count={len(objects)}"
             if objects
             else "received empty objects batch"
         )
-        self.cache.set_objects(objects, frame_id=frame_id)
+        self.cache.set_objects(objects, frame_id=frame_id, timestamp=timestamp)
         self._logger(message)
         return self._after_update(extra_messages=(message,))
 
@@ -199,7 +201,9 @@ class PredictionRuntime:
         if isinstance(event, TrajectoryEvent):
             return self.on_trajectory(event.trajectory, trajectory_id=event.trajectory_id)
         if isinstance(event, ObjectsEvent):
-            return self.on_objects(event.objects, frame_id=event.frame_id)
+            return self.on_objects(
+                event.objects, frame_id=event.frame_id, timestamp=event.timestamp
+            )
         if isinstance(event, GeometryEvent):
             return self.on_geometry(
                 event.geometry,
@@ -215,6 +219,12 @@ class PredictionRuntime:
 
     def try_predict(self) -> RuntimeResult:
         return self._after_update()
+
+    def reset(self) -> None:
+        """Reset orchestration on a clock jump without changing the physics model."""
+        self.cache.reset()
+        self.coordinator.reset_cycle_tracking()
+        self._active_cycle_id = None
 
     def _after_update(self, *, extra_messages: tuple[str, ...] = ()) -> RuntimeResult:
         result: CoordinatorResult = self.coordinator.try_predict()

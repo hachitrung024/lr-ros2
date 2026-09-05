@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+import math
 
 from .cache import PredictionSnapshot
 
@@ -28,6 +29,11 @@ class ValidationConfig:
     max_state_age_sec: float | None = None
     timestamp_tolerance_sec: float = 1e-3
     profile: PredictionProfile = PredictionProfile.STATIC
+
+    def __post_init__(self):
+        for value in (self.max_object_age_sec, self.max_geometry_age_sec, self.max_state_age_sec):
+            if value is not None and (not math.isfinite(value) or value < 0):
+                raise ValueError('input age limits must be finite and non-negative')
 
 
 @dataclass(frozen=True)
@@ -112,20 +118,32 @@ class InputValidator:
         ):
             reasons.append("geometry source timestamp does not match active trajectory")
 
-        if self.config.max_object_age_sec is not None and snapshot.objects:
-            age = trajectory.timestamp - min(obj.timestamp for obj in snapshot.objects)
-            if age > self.config.max_object_age_sec:
-                reasons.append("stale tracked objects")
-
-        if self.config.max_geometry_age_sec is not None and snapshot.geometry:
-            age = trajectory.timestamp - min(step.timestamp for step in snapshot.geometry)
-            if age > self.config.max_geometry_age_sec:
-                reasons.append("stale geometry")
-
-        if self.config.max_state_age_sec is not None and snapshot.state is not None:
-            age = trajectory.timestamp - snapshot.state.timestamp
-            if age > self.config.max_state_age_sec:
-                reasons.append("stale state")
+        object_stamps = [obj.timestamp for obj in snapshot.objects]
+        if snapshot.objects_timestamp is not None:
+            object_stamps.append(snapshot.objects_timestamp)
+        elif self.config.max_object_age_sec is not None and not object_stamps:
+            reasons.append('missing tracked objects batch timestamp')
+        for label, stamps, limit in (
+            ('tracked objects', object_stamps, self.config.max_object_age_sec),
+            (
+                'geometry',
+                [step.timestamp for step in snapshot.geometry],
+                self.config.max_geometry_age_sec,
+            ),
+            (
+                'state',
+                [] if snapshot.state is None else [snapshot.state.timestamp],
+                self.config.max_state_age_sec,
+            ),
+        ):
+            if any(not math.isfinite(stamp) for stamp in stamps):
+                reasons.append(f'invalid {label} timestamp')
+            elif stamps:
+                # A microsecond absorbs float rounding at Unix-epoch magnitudes.
+                if max(stamps) - trajectory.timestamp > 1e-6:
+                    reasons.append(f'future {label}')
+                if limit is not None and trajectory.timestamp - min(stamps) > limit + 1e-6:
+                    reasons.append(f'stale {label}')
 
         trajectory_step_ids = {step.step_id for step in trajectory.steps}
         geometry_step_ids = {step.step_id for step in snapshot.geometry}

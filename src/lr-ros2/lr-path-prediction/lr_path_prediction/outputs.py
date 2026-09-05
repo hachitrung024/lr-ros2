@@ -9,7 +9,7 @@ from geometry_msgs.msg import Point
 from std_msgs.msg import ColorRGBA, Header
 from visualization_msgs.msg import Marker, MarkerArray
 
-from .core import StepPrediction
+from .presentation import StepPrediction
 
 
 def predictions_to_diagnostics(
@@ -30,9 +30,7 @@ def predictions_to_diagnostics(
         )
         status = DiagnosticStatus()
         status.level = level
-        status.name = (
-            f"lr_path_prediction/step_{prediction.step_index:02d}"
-        )
+        status.name = f"lr_path_prediction/step_{prediction.step_index:02d}"
         status.hardware_id = "landfill_rover"
         status.message = ", ".join(labels)
         normal = prediction.terrain.normal_xyz
@@ -97,13 +95,11 @@ def predictions_to_diagnostics(
             _value("zmp_valid", prediction.zmp_valid),
             _value(
                 "zmp_x_m",
-                prediction.zmp_xy[0]
-                if prediction.zmp_xy is not None else math.nan,
+                prediction.zmp_xy[0] if prediction.zmp_xy is not None else math.nan,
             ),
             _value(
                 "zmp_y_m",
-                prediction.zmp_xy[1]
-                if prediction.zmp_xy is not None else math.nan,
+                prediction.zmp_xy[1] if prediction.zmp_xy is not None else math.nan,
             ),
             _value("zmp_margin_m", prediction.zmp_margin_m),
             _value(
@@ -276,15 +272,9 @@ def _slope_color(
     warning_deg: float,
     critical_deg: float,
 ) -> ColorRGBA:
-    if (
-        prediction.terrain.valid
-        and prediction.terrain.slope_deg >= critical_deg
-    ):
+    if prediction.terrain.valid and prediction.terrain.slope_deg >= critical_deg:
         return ColorRGBA(r=1.0, g=0.05, b=0.0, a=1.0)
-    if (
-        prediction.terrain.valid
-        and prediction.terrain.slope_deg >= warning_deg
-    ):
+    if prediction.terrain.valid and prediction.terrain.slope_deg >= warning_deg:
         return ColorRGBA(r=1.0, g=0.65, b=0.0, a=1.0)
     return ColorRGBA(r=0.55, g=0.55, b=0.55, a=1.0)
 
@@ -298,10 +288,7 @@ def _slope_label_text(prediction: StepPrediction) -> str:
 def _nearest_collision_prediction(
     predictions: list[StepPrediction],
 ) -> StepPrediction | None:
-    collisions = [
-        prediction for prediction in predictions
-        if prediction.object_collision
-    ]
+    collisions = [prediction for prediction in predictions if prediction.object_collision]
     if not collisions:
         return None
     return min(
@@ -329,10 +316,7 @@ def _append_collision_warning(
     center_z = point.z + warning_height_m
     half_width = triangle_size_m * 0.5
     triangle_height = triangle_size_m * math.sqrt(3.0) * 0.5
-    yaw = (
-        prediction.rover_yaw_rad
-        if math.isfinite(prediction.rover_yaw_rad) else 0.0
-    )
+    yaw = prediction.rover_yaw_rad if math.isfinite(prediction.rover_yaw_rad) else 0.0
     right_x = -math.sin(yaw)
     right_y = math.cos(yaw)
     top = Point(
@@ -351,27 +335,25 @@ def _append_collision_warning(
         z=center_z - triangle_height / 3.0,
     )
 
-    fill = _base_marker(
-        header, "collision_warning_fill", 0, Marker.TRIANGLE_LIST
-    )
+    fill = _base_marker(header, "collision_warning_fill", 0, Marker.TRIANGLE_LIST)
     fill.points = [
-        top, lower_left, lower_right,
-        top, lower_right, lower_left,
+        top,
+        lower_left,
+        lower_right,
+        top,
+        lower_right,
+        lower_left,
     ]
     fill.color = ColorRGBA(r=0.65, g=0.0, b=0.12, a=0.70)
     output.markers.append(fill)
 
-    outline = _base_marker(
-        header, "collision_warning_outline", 0, Marker.LINE_STRIP
-    )
+    outline = _base_marker(header, "collision_warning_outline", 0, Marker.LINE_STRIP)
     outline.points = [top, lower_left, lower_right, top]
     outline.scale.x = line_width_m
     outline.color = ColorRGBA(r=1.0, g=0.0, b=0.20, a=1.0)
     output.markers.append(outline)
 
-    symbol = _base_marker(
-        header, "collision_warning_symbol", 0, Marker.TEXT_VIEW_FACING
-    )
+    symbol = _base_marker(header, "collision_warning_symbol", 0, Marker.TEXT_VIEW_FACING)
     symbol.pose.position.x = point.x
     symbol.pose.position.y = point.y
     symbol.pose.position.z = center_z + 0.03
@@ -386,9 +368,7 @@ def _display_position(
     marker_z_offset_m: float,
 ) -> Point:
     z_value = (
-        prediction.terrain.elevation_m
-        if prediction.terrain.valid
-        else prediction.position_xyz[2]
+        prediction.terrain.elevation_m if prediction.terrain.valid else prediction.position_xyz[2]
     )
     return Point(
         x=prediction.position_xyz[0],

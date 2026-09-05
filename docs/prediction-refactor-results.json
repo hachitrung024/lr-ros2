@@ -1,0 +1,301 @@
+{
+  "date": "2026-09-05",
+  "baseline_commit": "fd6d9d1074db38b5d45778c3da6cca8e7e1434b3",
+  "hardware": {
+    "cpu": "Intel Core i5-11400H",
+    "gpu": "NVIDIA GeForce RTX 3050 Laptop GPU 4 GiB"
+  },
+  "ros": "Humble",
+  "zed_sdk": "5.4.1",
+  "warmup_svo_sec": 10,
+  "duration_svo_sec": 60,
+  "svo": "/workspace/svo/zed_20260710_092420_0001.svo2",
+  "headless": true,
+  "python_tests_passed": 108,
+  "display_lint_checks_passed": 9,
+  "before": {
+    "first_svo_stamp": 1783700660.562045,
+    "last_svo_stamp": 1783700730.562522,
+    "window_wall_sec": 59.89484481299996,
+    "counts": {
+      "trajectory": 222,
+      "prediction": 207,
+      "mask": 426,
+      "diagnostics": 120,
+      "boxes": 52
+    },
+    "completed_cycle_fraction": 0.9324324324324325,
+    "boxes_per_mask": 0.12206572769953052,
+    "prediction_latency_p50_sec": 0.0,
+    "prediction_latency_p95_sec": 0.0,
+    "resource_samples": 59,
+    "lr_nodes": 10,
+    "process_counts": [
+      12
+    ],
+    "cpu_percent_mean": 405.46271186440674,
+    "rss_mib_mean": 3171.7599311440677,
+    "rss_mib_peak": 3183.87890625,
+    "gpu_memory_mib_mean": 945.0,
+    "gpu_memory_mib_peak": 945.0,
+    "gpu_utilization_percent_mean": 47.271186440677965,
+    "diagnostics": {
+      "zed_node: ZED 2i": {
+        "samples": 60,
+        "messages": {
+          "Camera grabbing": 60
+        },
+        "last_values": {
+          "Uptime": "0 days, 0 hours, 1 min, 9.7822 sec",
+          "IPC Enabled": "YES",
+          "Camera Grab rate": "15 Hz",
+          "Data Capture": "Tot. Processing Time: 0.067356 sec (Max. 0.067 sec)",
+          "Frame Drop rate": "20/1039 (1.92493%)",
+          "Input mode": "SVO",
+          "Video/Depth": "Processing Time: 0.009239 sec (Max. 0.067 sec)",
+          "Playing SVO": "Frame: 1019/28154 (3.6%)",
+          "SVO Loop": "OFF",
+          "SVO Real Time mode": "ON",
+          "Depth status": "ACTIVE",
+          "Depth mode": "NEURAL LIGHT",
+          "Point Cloud": "Processing Time: 0.001 sec (Max. 0.100 sec)",
+          "Object Detection": "INACTIVE",
+          "Body Tracking": "INACTIVE",
+          "Positional Tracking mode": "GEN 1",
+          "Pos. Tracking status": "INACTIVE",
+          "GNSS Fusion": "DISABLED",
+          "TF IMU": "DISABLED",
+          "IMU Sensor": "Topics not subscribed",
+          "Magnetometer Sensor": "N/A",
+          "Barometer Sensor": "N/A",
+          "Left CMOS Temp.": "N/A",
+          "Right CMOS Temp.": "N/A",
+          "SVO Recording": "NOT ACTIVE",
+          "Streaming Server": "NOT ACTIVE"
+        },
+        "sampled_callback_ms": {}
+      },
+      "lr_terrain_geometry/terrain_geometry": {
+        "samples": 60,
+        "messages": {
+          "Terrain estimator running": 60
+        },
+        "last_values": {
+          "input_topic": "/zed/zed_node/point_cloud/cloud_registered",
+          "input_frame": "zed_left_camera_frame",
+          "map_frame": "map",
+          "input_count": "390",
+          "processed_count": "386",
+          "average_input_hz": "5.25",
+          "cloud_age_sec": "0.151",
+          "processing_ms": "149.48",
+          "processing_ms_ema": "169.25",
+          "cells": "317",
+          "points": "195753",
+          "accepted": "125",
+          "rejected": "28",
+          "pending": "163",
+          "tf_failures": "4",
+          "malformed_clouds": "0",
+          "last_reset_reason": ""
+        },
+        "sampled_callback_ms": {
+          "processing_ms": {
+            "mean": 148.062,
+            "p95_nearest_rank": 266.62
+          }
+        }
+      }
+    }
+  },
+  "after": {
+    "first_svo_stamp": 1783700660.562045,
+    "last_svo_stamp": 1783700730.562522,
+    "window_wall_sec": 59.89586611000004,
+    "counts": {
+      "mask": 478,
+      "boxes": 402,
+      "trajectory": 223,
+      "prediction": 205,
+      "diagnostics": 300
+    },
+    "completed_cycle_fraction": 0.9192825112107623,
+    "boxes_per_mask": 0.8410041841004184,
+    "prediction_latency_p50_sec": 0.0,
+    "prediction_latency_p95_sec": 0.0535863876342762,
+    "resource_samples": 59,
+    "lr_nodes": 7,
+    "process_counts": [
+      9
+    ],
+    "cpu_percent_mean": 390.12203389830506,
+    "rss_mib_mean": 2989.0191340042375,
+    "rss_mib_peak": 3014.46484375,
+    "gpu_memory_mib_mean": 945.0,
+    "gpu_memory_mib_peak": 945.0,
+    "gpu_utilization_percent_mean": 51.0,
+    "diagnostics": {
+      "box_estimator_3d": {
+        "samples": 60,
+        "messages": {
+          "mask-depth synchronization": 60
+        },
+        "last_values": {
+          "masks_received": "550",
+          "matched_pairs": "457",
+          "dropped_masks": "92",
+          "boxes_published": "457",
+          "tf_failures": "0",
+          "callback_ms": "5.241262000026836"
+        },
+        "sampled_callback_ms": {
+          "callback_ms": {
+            "mean": 16.980190683322387,
+            "p95_nearest_rank": 26.99539500008541
+          }
+        }
+      },
+      "lr_terrain_geometry/terrain_geometry": {
+        "samples": 60,
+        "messages": {
+          "Terrain estimator running": 60
+        },
+        "last_values": {
+          "input_topic": "/zed/zed_node/point_cloud/cloud_registered",
+          "input_frame": "zed_left_camera_frame",
+          "map_frame": "map",
+          "input_count": "531",
+          "processed_count": "529",
+          "average_input_hz": "7.17",
+          "cloud_age_sec": "0.056",
+          "processing_ms": "29.53",
+          "processing_ms_ema": "58.89",
+          "cells": "320",
+          "points": "221491",
+          "accepted": "145",
+          "rejected": "15",
+          "pending": "154",
+          "tf_failures": "2",
+          "malformed_clouds": "0",
+          "last_reset_reason": ""
+        },
+        "sampled_callback_ms": {
+          "processing_ms": {
+            "mean": 40.3675,
+            "p95_nearest_rank": 177.21
+          }
+        }
+      },
+      "prediction_node": {
+        "samples": 60,
+        "messages": {
+          "ready": 55,
+          "missing tracked objects batch; objects: stale input": 2,
+          "geometry step_ids unrelated to active trajectory": 3
+        },
+        "last_values": {
+          "output_count": "232",
+          "callback_ms": "0.7635960000698105",
+          "callback_ms_ema": "1.2564642014354903"
+        },
+        "sampled_callback_ms": {
+          "callback_ms": {
+            "mean": 1.0155054166602895,
+            "p95_nearest_rank": 3.139410000130738
+          }
+        }
+      },
+      "segmentation": {
+        "samples": 60,
+        "messages": {
+          "segmentation": 60
+        },
+        "last_values": {
+          "callback_ms": "66.19532200011236"
+        },
+        "sampled_callback_ms": {
+          "callback_ms": {
+            "mean": 85.18663531666941,
+            "p95_nearest_rank": 102.20097100000203
+          }
+        }
+      },
+      "zed_node: ZED 2i": {
+        "samples": 60,
+        "messages": {
+          "Camera grabbing": 60
+        },
+        "last_values": {
+          "Uptime": "0 days, 0 hours, 1 min, 10.0154 sec",
+          "IPC Enabled": "YES",
+          "Camera Grab rate": "15 Hz",
+          "Data Capture": "Tot. Processing Time: 0.067373 sec (Max. 0.067 sec)",
+          "Frame Drop rate": "20/1043 (1.91755%)",
+          "Input mode": "SVO",
+          "Video/Depth": "Processing Time: 0.010758 sec (Max. 0.067 sec)",
+          "Playing SVO": "Frame: 1023/28154 (3.6%)",
+          "SVO Loop": "OFF",
+          "SVO Real Time mode": "ON",
+          "Depth status": "ACTIVE",
+          "Depth mode": "NEURAL LIGHT",
+          "Point Cloud": "Processing Time: 0.001 sec (Max. 0.100 sec)",
+          "Object Detection": "INACTIVE",
+          "Body Tracking": "INACTIVE",
+          "Positional Tracking mode": "GEN 1",
+          "Pos. Tracking status": "INACTIVE",
+          "GNSS Fusion": "DISABLED",
+          "TF IMU": "DISABLED",
+          "IMU Sensor": "Topics not subscribed",
+          "Magnetometer Sensor": "N/A",
+          "Barometer Sensor": "N/A",
+          "Left CMOS Temp.": "N/A",
+          "Right CMOS Temp.": "N/A",
+          "SVO Recording": "NOT ACTIVE",
+          "Streaming Server": "NOT ACTIVE"
+        },
+        "sampled_callback_ms": {}
+      }
+    }
+  },
+  "replay_smoke": {
+    "command": [
+      "ros2",
+      "launch",
+      "lr_display_rviz2",
+      "display_zed_cam.launch.py",
+      "camera_model:=zed2i",
+      "publish_svo_clock:=true",
+      "segmentation_model_path:=models/best.pt",
+      "mavlink:=true",
+      "future_path:=true",
+      "svo_path:=/workspace/svo/zed_20260710_092420_0001.svo2",
+      "prediction_profile:=dynamic"
+    ],
+    "lr_nodes": [
+      "box_estimator_3d",
+      "canonical_prediction_visualizer",
+      "mavlink_pose",
+      "prediction_bridge_node",
+      "prediction_node",
+      "segmentation",
+      "terrain_geometry"
+    ],
+    "rviz_present": true,
+    "pause_stops_clock_and_prediction": true,
+    "resume_recovers_prediction": true,
+    "rewind_clock": true,
+    "monotonic_trajectory_ids": true,
+    "rewind_clears_acceleration": true,
+    "rewind_clears_markers": true,
+    "prediction_recovers_after_rewind": true,
+    "rviz_shutdown": "SIGTERM after 5 second SIGINT timeout; exit -15"
+  },
+  "limitations": [
+    "One before/after pair on one SVO window; no sustained FPS guarantee.",
+    "RSS sums can double-count shared pages; GPU readings are device-wide.",
+    "boxes_per_mask is observed batch throughput, not detection accuracy.",
+    "Callback timings are 1 Hz diagnostic samples, not a full callback trace.",
+    "Prediction latency uses 15 Hz SVO clock; zero is not zero wall-time latency.",
+    "RViz shutdown was not clean: earlier run exited -11; final replay run required SIGTERM (-15) after passing replay checks."
+  ]
+}

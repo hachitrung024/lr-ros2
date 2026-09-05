@@ -4,7 +4,7 @@ from diagnostic_msgs.msg import DiagnosticStatus
 from std_msgs.msg import Header
 from visualization_msgs.msg import Marker
 
-from lr_path_prediction.core import StepPrediction, TerrainSample
+from lr_path_prediction.presentation import StepPrediction, TerrainSample
 from lr_path_prediction.outputs import (
     predictions_to_diagnostics,
     predictions_to_markers,
@@ -74,18 +74,12 @@ def test_markers_include_points_slope_label_and_normal():
         "prediction_labels",
         "terrain_normals",
     }
-    label = next(
-        marker for marker in message.markers
-        if marker.ns == "prediction_labels"
-    )
+    label = next(marker for marker in message.markers if marker.ns == "prediction_labels")
     assert label.text == "10.0 deg"
     assert label.color.r == 0.55
     assert label.color.g == 0.55
     assert label.color.b == 0.55
-    normal = next(
-        marker for marker in message.markers
-        if marker.ns == "terrain_normals"
-    )
+    normal = next(marker for marker in message.markers if marker.ns == "terrain_normals")
     assert normal.points[0].z == 0.4
     assert math.isclose(normal.points[1].z, 1.2)
 
@@ -101,18 +95,11 @@ def test_collision_warning_is_a_large_triangle_with_separate_symbol():
         label_height_m=0.45,
     )
 
-    slope_label = next(
-        marker for marker in message.markers
-        if marker.ns == "prediction_labels"
-    )
+    slope_label = next(marker for marker in message.markers if marker.ns == "prediction_labels")
     assert slope_label.text == "10.0 deg"
-    symbol = next(
-        marker for marker in message.markers
-        if marker.ns == "collision_warning_symbol"
-    )
+    symbol = next(marker for marker in message.markers if marker.ns == "collision_warning_symbol")
     outline = next(
-        marker for marker in message.markers
-        if marker.ns == "collision_warning_outline"
+        marker for marker in message.markers if marker.ns == "collision_warning_outline"
     )
     assert symbol.text == "!"
     assert symbol.scale.z == 0.60
@@ -147,16 +134,10 @@ def test_only_nearest_collision_is_highlighted():
         label_height_m=0.45,
     )
 
-    symbols = [
-        marker for marker in message.markers
-        if marker.ns == "collision_warning_symbol"
-    ]
+    symbols = [marker for marker in message.markers if marker.ns == "collision_warning_symbol"]
     assert len(symbols) == 1
     assert symbols[0].pose.position.x == 2.0
-    points = next(
-        marker for marker in message.markers
-        if marker.ns == "prediction_steps"
-    )
+    points = next(marker for marker in message.markers if marker.ns == "prediction_steps")
     assert points.colors[0].r == 0.55
     assert points.colors[1].r == 1.0
     assert points.colors[1].b == 0.55

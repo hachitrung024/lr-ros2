@@ -27,11 +27,7 @@ from launch_ros.actions import Node
 
 
 def _load_launch_module():
-    path = (
-        Path(__file__).resolve().parents[1]
-        / "launch"
-        / "display_zed_cam.launch.py"
-    )
+    path = Path(__file__).resolve().parents[1] / "launch" / "display_zed_cam.launch.py"
     spec = importlib.util.spec_from_file_location("display_zed_cam", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -41,6 +37,9 @@ def _load_launch_module():
 def _context(**overrides):
     values = {
         "start_zed_node": "true",
+        "start_rviz": "true",
+        "bridge_params_file": "/tmp/bridge.yaml",
+        "prediction_runtime_params_file": "/tmp/runtime.yaml",
         "camera_name": "zed",
         "camera_model": "zed2i",
         "svo_path": "/tmp/session.svo2",
@@ -77,26 +76,16 @@ def _context(**overrides):
 
 
 def _node_executables(actions):
-    return [
-        str(action.node_executable)
-        for action in actions
-        if isinstance(action, Node)
-    ]
+    return [str(action.node_executable) for action in actions if isinstance(action, Node)]
 
 
 def _zed_arguments(actions):
-    include = next(
-        action
-        for action in actions
-        if isinstance(action, IncludeLaunchDescription)
-    )
+    include = next(action for action in actions if isinstance(action, IncludeLaunchDescription))
     return dict(include.launch_arguments)
 
 
 def _substitution_text(context, value):
-    return perform_substitutions(
-        context, normalize_to_list_of_substitutions(value)
-    )
+    return perform_substitutions(context, normalize_to_list_of_substitutions(value))
 
 
 def test_mavlink_false_preserves_zed_tf_and_has_no_mavlink_node():
@@ -142,19 +131,19 @@ def test_prediction_auto_starts_with_all_three_inputs():
         mavlink="true",
         start_terrain_node="true",
         segmentation_model_path="/tmp/best.pt",
+        start_segmentation_node="auto",
     )
 
     actions = module.launch_setup(context)
 
-    executables = _node_executables(actions)
-    assert "path_risk_predictor_node" not in executables
-    assert {
-        "trajectory_adapter_node",
-        "geometry_adapter_node",
-        "tracked_objects_adapter_node",
-        "prediction_node",
-        "canonical_prediction_visualizer_node",
-    }.issubset(executables)
+    include = [a for a in actions if isinstance(a, IncludeLaunchDescription)][-1]
+    assert include.condition.evaluate(context)
+    args = dict(include.launch_arguments)
+    assert (
+        _substitution_text(context, args['prediction_runtime_params_file']) == '/tmp/runtime.yaml'
+    )
+    assert _substitution_text(context, args['bridge_params_file']) == '/tmp/bridge.yaml'
+    assert not any('adapter_node' in exe for exe in _node_executables(actions))
 
 
 def test_dynamic_prediction_adds_rover_state_adapter():
@@ -165,21 +154,25 @@ def test_dynamic_prediction_adds_rover_state_adapter():
         mavlink="true",
         start_terrain_node="true",
         segmentation_model_path="/tmp/best.pt",
+        start_segmentation_node="auto",
         prediction_profile="dynamic",
     )
 
     actions = module.launch_setup(context)
 
-    assert "rover_state_adapter_node" in _node_executables(actions)
+    include = [a for a in actions if isinstance(a, IncludeLaunchDescription)][-1]
+    assert (
+        _substitution_text(context, dict(include.launch_arguments)['prediction_profile'])
+        == 'dynamic'
+    )
+    assert include.condition.evaluate(context)
 
 
 def test_mavlink_live_and_missing_svo_clock_are_rejected():
     """Offline MAVLink replay requires an SVO clock producer."""
     module = _load_launch_module()
     live_context = _context(mavlink="true", svo_path="live")
-    clock_context = _context(
-        mavlink="true", publish_svo_clock="false"
-    )
+    clock_context = _context(mavlink="true", publish_svo_clock="false")
 
     live_actions = module.launch_setup(live_context)
     clock_actions = module.launch_setup(clock_context)
@@ -193,11 +186,36 @@ def test_mavlink_live_and_missing_svo_clock_are_rejected():
 def test_invalid_mavlink_extrinsic_is_rejected():
     """A malformed body-to-camera transform fails during launch setup."""
     module = _load_launch_module()
-    context = _context(
-        mavlink="true", mavlink_body_to_camera="[0, 1]"
-    )
+    context = _context(mavlink="true", mavlink_body_to_camera="[0, 1]")
 
     actions = module.launch_setup(context)
     message = _substitution_text(context, actions[0].msg)
 
     assert "mavlink_body_to_camera" in message
+
+
+def test_headless_launch_and_auto_disable():
+    """Allow headless display while prediction stays conditional on its inputs."""
+    module = _load_launch_module()
+    context = _context(start_rviz='false')
+    actions = module.launch_setup(context)
+    rviz = next(a for a in actions if isinstance(a, Node) and str(a.node_executable) == 'rviz2')
+    assert not rviz.condition.evaluate(context)
+    prediction = [a for a in actions if isinstance(a, IncludeLaunchDescription)][-1]
+    assert not prediction.condition.evaluate(context)
+
+
+def test_shared_prediction_launch_has_three_processes():
+    """Both profiles use one bridge, the engine and the visualizer."""
+    path = (
+        Path(__file__).resolve().parents[2] / 'lr-path-prediction/launch/path_prediction.launch.py'
+    )
+    spec = importlib.util.spec_from_file_location('shared_prediction_launch', path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    executables = _node_executables(module.generate_launch_description().entities)
+    assert executables == [
+        'prediction_bridge_node',
+        'prediction_node',
+        'canonical_prediction_visualizer_node',
+    ]

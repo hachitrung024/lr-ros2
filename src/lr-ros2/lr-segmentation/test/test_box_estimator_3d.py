@@ -1,4 +1,5 @@
 import time
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -235,3 +236,21 @@ def test_image_decoders_preserve_mask_and_depth_values():
         depth_message_to_meters(depth),
         [[1.0, 2.0], [3.0, 4.0]],
     )
+
+
+def test_seek_clears_buffers_and_markers_without_publishing_free_space(ros_context):
+    node = BoxEstimator3DNode(node_name="box_seek_test")
+    detections, markers = [], []
+    node._box_publisher = SimpleNamespace(publish=detections.append)
+    node._marker_publisher = SimpleNamespace(publish=markers.append)
+    try:
+        header = Header(stamp=Time(sec=20), frame_id="camera_optical")
+        node._on_mask(labels_to_image_message(np.zeros((2, 2), dtype=np.uint16), header))
+        node._published_boxes = 3
+        node._on_time_jump(None)
+        assert not node._pairs.masks and not node._pairs.depths
+        assert node._pairs.mask_count == node._published_boxes == 0
+        assert not detections
+        assert markers[-1].markers[0].action == Marker.DELETEALL
+    finally:
+        node.destroy_node()

@@ -40,7 +40,7 @@ def make_color_image(value=0):
 
 
 class FakeSegmentationModel:
-    def predict(self, image_bgr):
+    def predict(self, image_bgr, *, render_overlay=True):
         overlay = image_bgr.copy()
         overlay[1:7, 2:8] = [10, 20, 30]
         labels = np.zeros(image_bgr.shape[:2], dtype=np.uint16)
@@ -102,9 +102,7 @@ def test_node_publishes_rgb_overlay(ros_context):
             )
         )
         segmentation_outputs = {
-            name: types
-            for name, types in publishers.items()
-            if name.startswith("/segmentation/")
+            name: types for name, types in publishers.items() if name.startswith("/segmentation/")
         }
         assert segmentation_outputs == {
             "/segmentation/instance_mask": ["sensor_msgs/msg/Image"],

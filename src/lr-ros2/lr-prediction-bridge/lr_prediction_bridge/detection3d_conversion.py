@@ -41,11 +41,10 @@ def frame_local_track_id(
     detection_index: int,
     stamp_ns: int,
 ) -> int:
-    """Return a NON-PERSISTENT track_id unique within one source message.
+    """Preserve numeric tracker IDs; use frame-local IDs for other sources.
 
-    P0 policy: segmentation/terrain do not provide temporal tracking. IDs are
-    reproducible for a given Detection3DArray but must not be treated as stable
-    across frames.
+    LR box tracker IDs persist until reset. Fallback timestamp/index IDs are
+    reproducible for one message and do not imply temporal association.
     """
     if detection_id:
         parts = str(detection_id).split(":", 1)

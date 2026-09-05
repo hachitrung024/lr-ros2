@@ -12,12 +12,16 @@
   <exec_depend>diagnostic_msgs</exec_depend>
   <exec_depend>geometry_msgs</exec_depend>
   <exec_depend>grid_map_msgs</exec_depend>
-  <exec_depend>nav_msgs</exec_depend>
   <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>lr_prediction_bridge</exec_depend>
+  <exec_depend>prediction_core</exec_depend>
+  <exec_depend>prediction_ros</exec_depend>
   <exec_depend>rclpy</exec_depend>
+  <exec_depend>lr_terrain_geometry</exec_depend>
   <exec_depend>safety_perception_msgs</exec_depend>
   <exec_depend>std_msgs</exec_depend>
-  <exec_depend>vision_msgs</exec_depend>
   <exec_depend>visualization_msgs</exec_depend>
 
   <test_depend>ament_flake8</test_depend>

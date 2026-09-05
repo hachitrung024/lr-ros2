@@ -56,6 +56,7 @@ def test_model_returns_rendered_overlay(tmp_path, monkeypatch):
         boxes = SimpleNamespace(conf=np.asarray([0.9, 0.8]))
 
         def plot(self):
+            calls['plot'] = calls.get('plot', 0) + 1
             return np.full((10, 12, 3), 17, dtype=np.uint8)
 
     class FakeYolo:
@@ -88,3 +89,9 @@ def test_model_returns_rendered_overlay(tmp_path, monkeypatch):
     assert prediction.instance_labels.dtype == np.uint16
     assert set(np.unique(prediction.instance_labels)) == {0, 1, 2}
     assert prediction.instance_labels[5, 5] == 1
+
+    assert calls['plot'] == 1
+    no_overlay = model.predict(source, render_overlay=False)
+    assert no_overlay.overlay_bgr is None
+    assert calls['plot'] == 1
+    np.testing.assert_array_equal(no_overlay.instance_labels, prediction.instance_labels)

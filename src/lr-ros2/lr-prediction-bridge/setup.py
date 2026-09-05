@@ -16,12 +16,14 @@ setup(
     ],
     install_requires=["setuptools"],
     zip_safe=True,
+    extras_require={"test": ["pytest"]},
     maintainer="Landfill Rover Team",
     maintainer_email="dev@example.com",
     description="Upstream adapters for Prediction safety_perception_msgs topics",
     license="Proprietary",
     entry_points={
         "console_scripts": [
+            "prediction_bridge_node = lr_prediction_bridge.prediction_bridge_node:main",
             "trajectory_adapter_node = lr_prediction_bridge.trajectory_adapter_node:main",
             "rover_state_adapter_node = lr_prediction_bridge.rover_state_adapter_node:main",
             "geometry_adapter_node = lr_prediction_bridge.geometry_adapter_node:main",

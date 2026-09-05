@@ -1,0 +1,323 @@
+{
+  "flat": {
+    "source_trajectory_stamp": 10.0,
+    "collision_steps": [],
+    "rollover_steps": [
+      {
+        "step_id": 0,
+        "predicted_roll_deg": -0.0,
+        "predicted_pitch_deg": -0.0,
+        "static_stability_margin_m": 0.375,
+        "normalized_static_stability_margin": 1.0,
+        "terrain_id": "plane",
+        "confidence_or_validity": null,
+        "critical_tip": {
+          "front_deg": 48.65222278030633,
+          "rear_deg": 48.65222278030633,
+          "left_deg": 53.13010235415598,
+          "right_deg": 53.13010235415598,
+          "minimum_deg": 48.65222278030633,
+          "critical_edge": "front"
+        },
+        "dynamic_stability": {
+          "acceleration_available": false,
+          "external_wrench_available": false,
+          "external_wrench_included": false,
+          "effective_force_xyz_n": null,
+          "effective_gravity_projection_xy": null,
+          "effective_ssm_m": null,
+          "normalized_effective_ssm": null,
+          "zmp_xy": null,
+          "zmp_margin_m": null,
+          "normalized_zmp_margin": null,
+          "edge_stability_moments_nm": null,
+          "minimum_stability_moment_nm": null,
+          "normalized_minimum_stability_moment": null,
+          "critical_edge": null,
+          "valid": false,
+          "validity_reason": "acceleration_xyz unavailable",
+          "assumptions": [
+            "map/ENU frame with g_world=(0,0,-9.80665) m/s^2",
+            "acceleration_xyz is kinematic CoM acceleration excluding gravity",
+            "angular_velocity_xyz is not consumed (no inertia tensor configured)",
+            "stability moment and ZMP omit rotational inertia (-I alpha, -w x Iw)",
+            "ZMP is point-mass/translational, not full rigid-body ZMP",
+            "canonical FASM and LTR are not implemented",
+            "acceleration_xyz unavailable; effective SSM / ZMP / inertial moment omitted (None is never treated as zero)"
+          ],
+          "normalized_edge_stability_moments": null,
+          "nearest_effective_edge": null,
+          "nearest_zmp_edge": null
+        },
+        "nearest_static_edge": "front"
+      }
+    ]
+  },
+  "slope": {
+    "source_trajectory_stamp": 10.0,
+    "collision_steps": [],
+    "rollover_steps": [
+      {
+        "step_id": 0,
+        "predicted_roll_deg": -25.0,
+        "predicted_pitch_deg": -0.0,
+        "static_stability_margin_m": 0.2861184728088505,
+        "normalized_static_stability_margin": 0.6502692563837511,
+        "terrain_id": "plane",
+        "confidence_or_validity": null,
+        "critical_tip": {
+          "front_deg": 48.65222278030633,
+          "rear_deg": 48.65222278030633,
+          "left_deg": 53.13010235415598,
+          "right_deg": 53.13010235415598,
+          "minimum_deg": 48.65222278030633,
+          "critical_edge": "front"
+        },
+        "dynamic_stability": {
+          "acceleration_available": false,
+          "external_wrench_available": false,
+          "external_wrench_included": false,
+          "effective_force_xyz_n": null,
+          "effective_gravity_projection_xy": null,
+          "effective_ssm_m": null,
+          "normalized_effective_ssm": null,
+          "zmp_xy": null,
+          "zmp_margin_m": null,
+          "normalized_zmp_margin": null,
+          "edge_stability_moments_nm": null,
+          "minimum_stability_moment_nm": null,
+          "normalized_minimum_stability_moment": null,
+          "critical_edge": null,
+          "valid": false,
+          "validity_reason": "acceleration_xyz unavailable",
+          "assumptions": [
+            "map/ENU frame with g_world=(0,0,-9.80665) m/s^2",
+            "acceleration_xyz is kinematic CoM acceleration excluding gravity",
+            "angular_velocity_xyz is not consumed (no inertia tensor configured)",
+            "stability moment and ZMP omit rotational inertia (-I alpha, -w x Iw)",
+            "ZMP is point-mass/translational, not full rigid-body ZMP",
+            "canonical FASM and LTR are not implemented",
+            "acceleration_xyz unavailable; effective SSM / ZMP / inertial moment omitted (None is never treated as zero)"
+          ],
+          "normalized_edge_stability_moments": null,
+          "nearest_effective_edge": null,
+          "nearest_zmp_edge": null
+        },
+        "nearest_static_edge": "left"
+      }
+    ]
+  },
+  "dynamic": {
+    "source_trajectory_stamp": 10.0,
+    "collision_steps": [],
+    "rollover_steps": [
+      {
+        "step_id": 0,
+        "predicted_roll_deg": -25.0,
+        "predicted_pitch_deg": -0.0,
+        "static_stability_margin_m": 0.2861184728088505,
+        "normalized_static_stability_margin": 0.6502692563837511,
+        "terrain_id": "plane",
+        "confidence_or_validity": null,
+        "critical_tip": {
+          "front_deg": 48.65222278030633,
+          "rear_deg": 48.65222278030633,
+          "left_deg": 53.13010235415598,
+          "right_deg": 53.13010235415598,
+          "minimum_deg": 48.65222278030633,
+          "critical_edge": "front"
+        },
+        "dynamic_stability": {
+          "acceleration_available": true,
+          "external_wrench_available": false,
+          "external_wrench_included": false,
+          "effective_force_xyz_n": [
+            -100.0,
+            -50.0,
+            -980.665
+          ],
+          "effective_gravity_projection_xy": [
+            -0.03626711432379439,
+            0.13387336062646804
+          ],
+          "effective_ssm_m": 0.30612663937353196,
+          "normalized_effective_ssm": 0.6957423622125727,
+          "zmp_xy": [
+            -0.03626711432379438,
+            0.133873360626468
+          ],
+          "zmp_margin_m": 0.306126639373532,
+          "normalized_zmp_margin": 0.6957423622125728,
+          "edge_stability_moments_nm": {
+            "front": 374.2182146479992,
+            "rear": 308.2182146479992,
+            "left": 278.54929424860927,
+            "right": 522.1761161253622
+          },
+          "minimum_stability_moment_nm": 278.54929424860927,
+          "normalized_minimum_stability_moment": 0.6455482533156056,
+          "critical_edge": "left",
+          "valid": true,
+          "validity_reason": "dynamic evidence computed from acceleration and wrench semantics",
+          "assumptions": [
+            "map/ENU frame with g_world=(0,0,-9.80665) m/s^2",
+            "acceleration_xyz is kinematic CoM acceleration excluding gravity",
+            "angular_velocity_xyz is not consumed (no inertia tensor configured)",
+            "stability moment and ZMP omit rotational inertia (-I alpha, -w x Iw)",
+            "ZMP is point-mass/translational, not full rigid-body ZMP",
+            "canonical FASM and LTR are not implemented",
+            "external_wrenches=None; external loads not included"
+          ],
+          "normalized_edge_stability_moments": {
+            "front": 1.0175903484485846,
+            "rear": 0.8381202949644693,
+            "left": 0.6455482533156056,
+            "right": 1.2101623900974483
+          },
+          "nearest_effective_edge": "left",
+          "nearest_zmp_edge": "left"
+        },
+        "nearest_static_edge": "left"
+      }
+    ]
+  },
+  "margin": {
+    "source_trajectory_stamp": 10.0,
+    "collision_steps": [
+      {
+        "step_id": 0,
+        "distance_along_route_m": 0.0,
+        "collision_objects": [
+          {
+            "object_id": 7,
+            "object_class": "rock",
+            "min_distance_m": 0.07499999999999996,
+            "confidence_or_validity": null
+          }
+        ]
+      }
+    ],
+    "rollover_steps": [
+      {
+        "step_id": 0,
+        "predicted_roll_deg": -0.0,
+        "predicted_pitch_deg": -0.0,
+        "static_stability_margin_m": 0.375,
+        "normalized_static_stability_margin": 1.0,
+        "terrain_id": "plane",
+        "confidence_or_validity": null,
+        "critical_tip": {
+          "front_deg": 48.65222278030633,
+          "rear_deg": 48.65222278030633,
+          "left_deg": 53.13010235415598,
+          "right_deg": 53.13010235415598,
+          "minimum_deg": 48.65222278030633,
+          "critical_edge": "front"
+        },
+        "dynamic_stability": {
+          "acceleration_available": false,
+          "external_wrench_available": false,
+          "external_wrench_included": false,
+          "effective_force_xyz_n": null,
+          "effective_gravity_projection_xy": null,
+          "effective_ssm_m": null,
+          "normalized_effective_ssm": null,
+          "zmp_xy": null,
+          "zmp_margin_m": null,
+          "normalized_zmp_margin": null,
+          "edge_stability_moments_nm": null,
+          "minimum_stability_moment_nm": null,
+          "normalized_minimum_stability_moment": null,
+          "critical_edge": null,
+          "valid": false,
+          "validity_reason": "acceleration_xyz unavailable",
+          "assumptions": [
+            "map/ENU frame with g_world=(0,0,-9.80665) m/s^2",
+            "acceleration_xyz is kinematic CoM acceleration excluding gravity",
+            "angular_velocity_xyz is not consumed (no inertia tensor configured)",
+            "stability moment and ZMP omit rotational inertia (-I alpha, -w x Iw)",
+            "ZMP is point-mass/translational, not full rigid-body ZMP",
+            "canonical FASM and LTR are not implemented",
+            "acceleration_xyz unavailable; effective SSM / ZMP / inertial moment omitted (None is never treated as zero)"
+          ],
+          "normalized_edge_stability_moments": null,
+          "nearest_effective_edge": null,
+          "nearest_zmp_edge": null
+        },
+        "nearest_static_edge": "front"
+      }
+    ]
+  },
+  "intersection": {
+    "source_trajectory_stamp": 10.0,
+    "collision_steps": [
+      {
+        "step_id": 0,
+        "distance_along_route_m": 0.0,
+        "collision_objects": [
+          {
+            "object_id": 7,
+            "object_class": "rock",
+            "min_distance_m": 0.0,
+            "confidence_or_validity": null
+          }
+        ]
+      }
+    ],
+    "rollover_steps": [
+      {
+        "step_id": 0,
+        "predicted_roll_deg": -0.0,
+        "predicted_pitch_deg": -0.0,
+        "static_stability_margin_m": 0.375,
+        "normalized_static_stability_margin": 1.0,
+        "terrain_id": "plane",
+        "confidence_or_validity": null,
+        "critical_tip": {
+          "front_deg": 48.65222278030633,
+          "rear_deg": 48.65222278030633,
+          "left_deg": 53.13010235415598,
+          "right_deg": 53.13010235415598,
+          "minimum_deg": 48.65222278030633,
+          "critical_edge": "front"
+        },
+        "dynamic_stability": {
+          "acceleration_available": false,
+          "external_wrench_available": false,
+          "external_wrench_included": false,
+          "effective_force_xyz_n": null,
+          "effective_gravity_projection_xy": null,
+          "effective_ssm_m": null,
+          "normalized_effective_ssm": null,
+          "zmp_xy": null,
+          "zmp_margin_m": null,
+          "normalized_zmp_margin": null,
+          "edge_stability_moments_nm": null,
+          "minimum_stability_moment_nm": null,
+          "normalized_minimum_stability_moment": null,
+          "critical_edge": null,
+          "valid": false,
+          "validity_reason": "acceleration_xyz unavailable",
+          "assumptions": [
+            "map/ENU frame with g_world=(0,0,-9.80665) m/s^2",
+            "acceleration_xyz is kinematic CoM acceleration excluding gravity",
+            "angular_velocity_xyz is not consumed (no inertia tensor configured)",
+            "stability moment and ZMP omit rotational inertia (-I alpha, -w x Iw)",
+            "ZMP is point-mass/translational, not full rigid-body ZMP",
+            "canonical FASM and LTR are not implemented",
+            "acceleration_xyz unavailable; effective SSM / ZMP / inertial moment omitted (None is never treated as zero)"
+          ],
+          "normalized_edge_stability_moments": null,
+          "nearest_effective_edge": null,
+          "nearest_zmp_edge": null
+        },
+        "nearest_static_edge": "front"
+      }
+    ]
+  },
+  "unknown_terrain": {
+    "source_trajectory_stamp": 10.0,
+    "collision_steps": [],
+    "rollover_steps": []
+  }
+}

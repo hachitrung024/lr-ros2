@@ -4,9 +4,10 @@
 Prediction pipeline. The safety calculation itself runs in `prediction_core`
 through the `prediction_ros/prediction_node` executable.
 
-The standalone launch starts the complete stack: three LR input adapters, the
-canonical Prediction node, this visualizer, and—only for the dynamic
-profile—the rover-state adapter.
+The standalone launch starts three processes: the consolidated LR prediction
+bridge, canonical Prediction node and this visualizer. Only the dynamic
+profile enables the rover-state conversion inside the bridge. It is also
+included by the display launch, so runtime configuration has one source.
 
 ```bash
 ros2 launch lr_path_prediction path_prediction.launch.py \
@@ -68,5 +69,17 @@ values only and is not suitable for a field safety decision.
 
 The canonical output is evidence, not a Decision Node: it does not assign
 severity or publish Stop/Go commands. Detected objects are currently treated
-as static because `vision_msgs/Detection3DArray` does not provide persistent
-tracks or usable object velocity in this pipeline.
+as static because this pipeline does not publish object velocity. Numeric box
+IDs persist across frames until tracker reset; they are not globally unique.
+
+
+The old `lr_path_prediction.core` and `.node` physics implementation has been
+removed. Presentation dataclasses live in `.presentation`; GridMap sampling is
+shared with the bridge through `lr_terrain_geometry.grid_map_sampling`.
+Physics regression tests are in `prediction_core/test`, sampling/state tests
+in `lr_prediction_bridge/test`, and terrain sampling tests in
+`lr_terrain_geometry/test`.
+
+The visualizer joins asynchronous messages by trajectory ID, buffers results
+that arrive before trajectory/geometry, clears warnings when evidence is
+unavailable, and renders markers only for subscribers.
