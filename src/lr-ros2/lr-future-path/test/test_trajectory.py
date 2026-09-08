@@ -36,8 +36,8 @@ def test_nearest_index_honors_tolerance_and_skipped_frames():
     assert series.nearest_index(3_000, 1_000) == 1
 
 
-def test_future_sampling_stops_at_first_xy_radius_exit():
-    """Sampling stops at the first radius exit and does not re-enter."""
+def test_future_sampling_stops_at_along_path_distance_budget():
+    """A route that returns toward its origin cannot exceed the budget."""
     series = _series(
         [0, 1, 2, 3, 4, 5],
         [
@@ -59,6 +59,30 @@ def test_future_sampling_stops_at_first_xy_radius_exit():
     )
 
     assert indices == [0, 2, 3]
+
+
+def test_future_sampling_honors_time_horizon_and_ignores_small_jitter():
+    series = _series(
+        [0, 1, 2, 3, 20],
+        [
+            [0.0, 0.0, 0.0],
+            [0.1, 0.0, 0.0],
+            [-0.1, 0.0, 0.0],
+            [0.1, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+        ],
+    )
+
+    indices = series.future_indices(
+        0,
+        radius_m=5.0,
+        step_m=0.2,
+        max_gap_ns=30,
+        max_points=100,
+        max_horizon_ns=10,
+    )
+
+    assert indices == [0]
 
 
 def test_future_sampling_stops_at_timestamp_gap():

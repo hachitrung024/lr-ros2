@@ -3,14 +3,15 @@ canonical_prediction_visualizer:
     input.trajectory_topic: /trajectory
     input.geometry_topic: /geometry
     input.prediction_topic: /predict_output
-    input.terrain_topic: /terrain_geometry/grid_map
     output.steps_topic: /lr/path_prediction/steps
     output.markers_topic: /lr/path_prediction/markers
+    output.reference_path_topic: /lr/path_prediction/reference_path
     frames.map_frame: map
     warning.slope_deg: 20.0
     critical.slope_deg: 30.0
     visualization.normal_length_m: 0.8
     visualization.marker_z_offset_m: 0.10
+    visualization.hide_unknown_terrain: true
     visualization.label_height_m: 0.45
     visualization.collision_warning_height_m: 1.0
     visualization.collision_warning_triangle_size_m: 0.9

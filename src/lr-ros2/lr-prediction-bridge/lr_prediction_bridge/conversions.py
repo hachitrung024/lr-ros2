@@ -192,6 +192,8 @@ def geometry_from_trajectory(
         else:
             geom.plane_id = sample.plane_id
             geom.normal.x, geom.normal.y, geom.normal.z = sample.normal_xyz
+            geom.elevation_m = float(sample.elevation_m)
+            geom.elevation_valid = True
             geom.confidence_valid = sample.confidence is not None
             geom.confidence = float(sample.confidence or 0.0)
         out.steps.append(geom)

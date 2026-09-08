@@ -29,7 +29,14 @@ on `/predict_output`. This package joins it with `/trajectory` and `/geometry`
 and publishes:
 
 - `/lr/path_prediction/steps` (`diagnostic_msgs/msg/DiagnosticArray`);
-- `/lr/path_prediction/markers` (`visualization_msgs/msg/MarkerArray`).
+- `/lr/path_prediction/markers` (`visualization_msgs/msg/MarkerArray`);
+- `/lr/path_prediction/reference_path` (`nav_msgs/msg/Path`).
+
+The reference path and markers are emitted only after trajectory, geometry,
+and prediction with the same `trajectory_id` have been joined. They share the
+source trajectory timestamp and exactly the same displayed XYZ positions.
+Terrain elevation is carried in each `GeometryStep`, so presentation never
+mixes a prediction cycle with a newer rolling GridMap.
 
 RViz displays up to 20 future points. A point is gray by default, receives a
 slope label only when terrain is available, and has a terrain-normal arrow when
@@ -39,6 +46,11 @@ triangle is centered above that point. Positive-clearance candidates inside
 the configured safety margin remain raw evidence in `/predict_output`; they do
 not add a warning or change the UI color. Slope labels and colors are preserved
 independently from the collision warning.
+
+By default, RViz stops the visible path at the first step without valid terrain
+instead of drawing that step at z=0. Diagnostics still retain every step and
+report TERRAIN UNKNOWN. Set visualization.hide_unknown_terrain to false in the
+presentation parameters to restore the previous gray-point behavior.
 
 ## Profiles
 

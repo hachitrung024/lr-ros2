@@ -99,6 +99,8 @@ def test_geometry_preserves_sensor_stamp_and_unknown_cells():
     assert out.source_trajectory_stamp.sec == 10
     assert out.source_trajectory_id == 42
     assert len(out.steps) == 1
+    assert out.steps[0].elevation_valid
+    assert out.steps[0].elevation_m == pytest.approx(0.4)
     terrain = grid(state=0.0)
     assert not geometry_from_trajectory(traj, GridMapSampler(terrain), terrain.header).steps
 

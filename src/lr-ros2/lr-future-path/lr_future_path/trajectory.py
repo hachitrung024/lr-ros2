@@ -59,8 +59,9 @@ class PoseSeries:
         step_m: float,
         max_gap_ns: int,
         max_points: int,
+        max_horizon_ns: int | None = None,
     ) -> list[int]:
-        """Sample forward until the path first leaves an XY radius."""
+        """Sample forward within along-path distance and time budgets."""
         if radius_m <= 0.0:
             raise ValueError("radius_m must be positive")
         if step_m <= 0.0:
@@ -69,38 +70,41 @@ class PoseSeries:
             raise ValueError("max_gap_ns must be positive")
         if max_points < 1:
             raise ValueError("max_points must be at least one")
+        if max_horizon_ns is not None and max_horizon_ns <= 0:
+            raise ValueError("max_horizon_ns must be positive when provided")
         if not 0 <= current_index < len(self.stamps_ns):
             raise IndexError("current_index is outside the pose series")
 
         selected = [current_index]
-        last_valid = current_index
-        distance_since_sample = 0.0
-        origin_xy = self.positions[current_index, :2]
+        last_selected = current_index
+        path_distance = 0.0
         for index in range(current_index + 1, len(self.stamps_ns)):
             if (
                 int(self.stamps_ns[index] - self.stamps_ns[index - 1])
                 > max_gap_ns
             ):
                 break
-            radial_distance = float(
-                np.linalg.norm(self.positions[index, :2] - origin_xy)
-            )
-            if radial_distance > radius_m:
+            if (
+                max_horizon_ns is not None
+                and int(self.stamps_ns[index] - self.stamps_ns[current_index])
+                > max_horizon_ns
+            ):
                 break
-            distance_since_sample += float(
+            distance_from_selected = float(
                 np.linalg.norm(
                     self.positions[index, :2]
-                    - self.positions[index - 1, :2]
+                    - self.positions[last_selected, :2]
                 )
             )
-            last_valid = index
-            if distance_since_sample >= step_m:
-                selected.append(index)
-                distance_since_sample = 0.0
-                if len(selected) >= max_points:
-                    return selected
-        if last_valid != selected[-1] and len(selected) < max_points:
-            selected.append(last_valid)
+            if distance_from_selected < step_m:
+                continue
+            if path_distance + distance_from_selected > radius_m:
+                break
+            selected.append(index)
+            last_selected = index
+            path_distance += distance_from_selected
+            if len(selected) >= max_points:
+                return selected
         return selected
 
 

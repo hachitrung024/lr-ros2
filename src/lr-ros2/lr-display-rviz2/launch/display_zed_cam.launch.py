@@ -116,6 +116,11 @@ def launch_setup(context, *args, **kwargs):
     future_path_topic = LaunchConfiguration('future_path_topic')
     future_path_radius_m = LaunchConfiguration('future_path_radius_m')
     future_path_step_m = LaunchConfiguration('future_path_step_m')
+    future_path_horizon_s = LaunchConfiguration('future_path_horizon_s')
+    future_path_stationary_speed_mps = LaunchConfiguration(
+        'future_path_stationary_speed_mps'
+    )
+    future_path_max_speed_mps = LaunchConfiguration('future_path_max_speed_mps')
     mavlink = LaunchConfiguration('mavlink')
     mavlink_dir = LaunchConfiguration('mavlink_dir')
     mavlink_db_path = LaunchConfiguration('mavlink_db_path')
@@ -148,14 +153,42 @@ def launch_setup(context, *args, **kwargs):
     mavlink_body_to_camera_val = [0.0] * 6
     future_path_radius_val = 15.0
     future_path_step_val = 0.2
+    future_path_horizon_val = 20.0
+    future_path_stationary_speed_val = 0.1
+    future_path_max_speed_val = 5.0
     if future_path_val:
         try:
             future_path_radius_val = float(future_path_radius_m.perform(context))
             future_path_step_val = float(future_path_step_m.perform(context))
-            if future_path_radius_val <= 0.0 or future_path_step_val <= 0.0:
+            future_path_horizon_val = float(future_path_horizon_s.perform(context))
+            future_path_stationary_speed_val = float(
+                future_path_stationary_speed_mps.perform(context)
+            )
+            future_path_max_speed_val = float(
+                future_path_max_speed_mps.perform(context)
+            )
+            if (
+                not all(
+                    math.isfinite(value)
+                    for value in (
+                        future_path_radius_val,
+                        future_path_step_val,
+                        future_path_horizon_val,
+                        future_path_stationary_speed_val,
+                        future_path_max_speed_val,
+                    )
+                )
+                or future_path_radius_val <= 0.0
+                or future_path_step_val <= 0.0
+                or future_path_horizon_val <= 0.0
+                or future_path_stationary_speed_val < 0.0
+                or future_path_max_speed_val <= future_path_stationary_speed_val
+            ):
                 raise ValueError
         except ValueError:
-            return _stop_launch('future_path_radius_m and future_path_step_m must be ' 'positive.')
+            return _stop_launch(
+                'Future-path distance, step, horizon, and speed thresholds are invalid.'
+            )
     if mavlink_val:
         try:
             mavlink_match_tolerance_val = float(mavlink_match_tolerance_s.perform(context))
@@ -300,6 +333,9 @@ def launch_setup(context, *args, **kwargs):
                     'body_to_camera': mavlink_body_to_camera_val,
                     'radius_m': future_path_radius_val,
                     'step_m': future_path_step_val,
+                    'horizon_s': future_path_horizon_val,
+                    'stationary_speed_mps': future_path_stationary_speed_val,
+                    'max_speed_mps': future_path_max_speed_val,
                     'max_points': 1000,
                     'use_sim_time': True,
                 }
@@ -449,6 +485,7 @@ def launch_setup(context, *args, **kwargs):
                 'output_topic': future_path_topic.perform(context),
                 'radius_m': radius_m_val,
                 'step_m': step_m_val,
+                'horizon_s': future_path_horizon_val,
                 'max_gap_s': 1.0,
                 'max_points': 1000,
                 'use_sim_time': publish_svo_clock,
@@ -605,12 +642,33 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 'future_path_radius_m',
                 default_value='15.0',
-                description='Maximum XY look-ahead radius in metres.',
+                description='Maximum cumulative XY look-ahead distance in metres.',
             ),
             DeclareLaunchArgument(
                 'future_path_step_m',
                 default_value='0.2',
                 description='Spatial downsampling step in metres.',
+            ),
+            DeclareLaunchArgument(
+                'future_path_horizon_s',
+                default_value='20.0',
+                description='Maximum future look-ahead time in seconds.',
+            ),
+            DeclareLaunchArgument(
+                'future_path_stationary_speed_mps',
+                default_value='0.1',
+                description=(
+                    'MAVLink samples at or below this reported speed are '
+                    'excluded from future-path sampling.'
+                ),
+            ),
+            DeclareLaunchArgument(
+                'future_path_max_speed_mps',
+                default_value='5.0',
+                description=(
+                    'Reject MAVLink future samples above this reported or '
+                    'position-derived XY speed.'
+                ),
             ),
             DeclareLaunchArgument(
                 'mavlink',

@@ -8,6 +8,7 @@ from lr_path_prediction.presentation import StepPrediction, TerrainSample
 from lr_path_prediction.outputs import (
     predictions_to_diagnostics,
     predictions_to_markers,
+    predictions_to_reference_path,
 )
 
 
@@ -18,6 +19,7 @@ def _prediction(
     step_index=1,
     distance=0.2,
     x_value=1.0,
+    terrain_valid=True,
 ):
     return StepPrediction(
         step_index=step_index,
@@ -26,7 +28,7 @@ def _prediction(
         distance_from_start_m=distance,
         time_from_start_sec=0.25,
         terrain=TerrainSample(
-            valid=True,
+            valid=terrain_valid,
             elevation_m=0.3,
             slope_deg=slope,
             normal_xyz=(0.0, 0.0, 1.0),
@@ -82,6 +84,66 @@ def test_markers_include_points_slope_label_and_normal():
     normal = next(marker for marker in message.markers if marker.ns == "terrain_normals")
     assert normal.points[0].z == 0.4
     assert math.isclose(normal.points[1].z, 1.2)
+
+
+def test_reference_path_uses_exact_marker_positions_and_yaw():
+    prediction = _prediction()
+    header = Header(frame_id="map")
+    markers = predictions_to_markers(
+        [prediction],
+        header,
+        slope_warning_deg=20.0,
+        slope_critical_deg=30.0,
+        normal_length_m=0.8,
+        marker_z_offset_m=0.1,
+        label_height_m=0.45,
+    )
+    path = predictions_to_reference_path(
+        [prediction], header, marker_z_offset_m=0.1
+    )
+
+    marker_points = next(
+        marker for marker in markers.markers if marker.ns == "prediction_steps"
+    ).points
+    assert len(path.poses) == len(marker_points) == 1
+    assert path.poses[0].pose.position == marker_points[0]
+    assert path.poses[0].pose.orientation.w == 1.0
+
+
+def test_unknown_terrain_hides_that_step_and_the_remaining_horizon():
+    predictions = [
+        _prediction(step_index=1, x_value=1.0),
+        _prediction(step_index=2, x_value=2.0, terrain_valid=False),
+        _prediction(step_index=3, x_value=3.0),
+    ]
+    header = Header(frame_id="map")
+
+    markers = predictions_to_markers(
+        predictions,
+        header,
+        slope_warning_deg=20.0,
+        slope_critical_deg=30.0,
+        normal_length_m=0.8,
+        marker_z_offset_m=0.1,
+        label_height_m=0.45,
+    )
+    path = predictions_to_reference_path(
+        predictions, header, marker_z_offset_m=0.1
+    )
+    diagnostics = predictions_to_diagnostics(
+        predictions,
+        header,
+        slope_warning_deg=20.0,
+        slope_critical_deg=30.0,
+    )
+
+    points = next(
+        marker for marker in markers.markers if marker.ns == "prediction_steps"
+    )
+    assert [point.x for point in points.points] == [1.0]
+    assert [pose.pose.position.x for pose in path.poses] == [1.0]
+    assert len(diagnostics.status) == 3
+    assert diagnostics.status[1].message == "TERRAIN UNKNOWN"
 
 
 def test_collision_warning_is_a_large_triangle_with_separate_symbol():

@@ -35,6 +35,11 @@ mavlink_db_path:=/path/to/session_mavlink.db
 
 When `future_path:=true` and `mavlink:=true`, the future path is read directly
 from the MAVLink database. The SVO VIO pose-cache pass is therefore skipped.
+The default future window is bounded by 15 m of cumulative XY travel and 20 s,
+with 0.2 m spatial sampling. Stationary MAVLink samples (at or below 0.1 m/s)
+and samples above 5 m/s are excluded from the path. Override these with
+`future_path_radius_m`, `future_path_horizon_s`, `future_path_step_m`,
+`future_path_stationary_speed_mps`, and `future_path_max_speed_mps`.
 
 ## Canonical prediction pipeline
 
@@ -67,6 +72,12 @@ The adapters perform these conversions:
 | `/segmentation/boxes_3d` (`vision_msgs/Detection3DArray`) | `/tracked_objects` (`safety_perception_msgs/TrackedObjectArray`) |
 | `/lr/mavlink/pose` (`geometry_msgs/PoseStamped`) | `/rover/state` (`safety_perception_msgs/RoverState`), dynamic only |
 
+The visualizer publishes `/lr/path_prediction/reference_path` only after the
+trajectory, geometry, and prediction for the same cycle are available. This
+cycle-matched path shares its timestamp and displayed XYZ points with
+`/lr/path_prediction/markers`; use it instead of the continuously updating raw
+future path when comparing prediction output in RViz.
+
 For up to 20 future steps, the canonical engine computes discrete oriented
 footprint collision candidates, terrain-relative roll and pitch, Static SSM,
 and normalized Static SSM. The dynamic profile additionally computes edge
@@ -83,7 +94,9 @@ node derives only UI warnings from that evidence:
 - orange/red points for configured slope display thresholds; only the nearest
   actual intersection is highlighted in magenta.
 
-Steps outside the current terrain GridMap remain gray. The box estimator has
+By default, visualization stops at the first step outside valid terrain
+coverage, while diagnostics continue to report those steps as TERRAIN UNKNOWN.
+The box estimator has
 Kalman tracking with persistent numeric IDs until its tracker resets. Its
 `Detection3DArray` output has no object velocity, so `velocity_valid` stays false
 and objects are treated as static within each prediction cycle. Class/score

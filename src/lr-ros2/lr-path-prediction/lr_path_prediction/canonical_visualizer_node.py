@@ -6,7 +6,7 @@ import math
 import time
 
 from diagnostic_msgs.msg import DiagnosticArray
-from grid_map_msgs.msg import GridMap
+from nav_msgs.msg import Path
 import rclpy
 from rclpy.clock import Clock, ClockType, JumpThreshold
 from rclpy.duration import Duration
@@ -21,9 +21,13 @@ from safety_perception_msgs.msg import (
 from std_msgs.msg import Header
 from visualization_msgs.msg import Marker, MarkerArray
 
-from lr_terrain_geometry.grid_map_sampling import GridMapSampler, TerrainSample
+from lr_terrain_geometry.grid_map_sampling import TerrainSample
 from .presentation import StepPrediction
-from .outputs import predictions_to_diagnostics, predictions_to_markers
+from .outputs import (
+    predictions_to_diagnostics,
+    predictions_to_markers,
+    predictions_to_reference_path,
+)
 
 
 _FOOTPRINT_INTERSECTION_EPSILON_M = 1e-9
@@ -53,14 +57,17 @@ class CanonicalPredictionVisualizerNode(Node):
         self._prediction_topic = str(
             self.declare_parameter("input.prediction_topic", "/predict_output").value
         )
-        self._terrain_topic = str(
-            self.declare_parameter("input.terrain_topic", "/terrain_geometry/grid_map").value
-        )
         steps_topic = str(
             self.declare_parameter("output.steps_topic", "/lr/path_prediction/steps").value
         )
         markers_topic = str(
             self.declare_parameter("output.markers_topic", "/lr/path_prediction/markers").value
+        )
+        reference_path_topic = str(
+            self.declare_parameter(
+                "output.reference_path_topic",
+                "/lr/path_prediction/reference_path",
+            ).value
         )
         self._map_frame = str(self.declare_parameter("frames.map_frame", "map").value).strip()
         self._slope_warning_deg = float(self.declare_parameter("warning.slope_deg", 20.0).value)
@@ -70,6 +77,11 @@ class CanonicalPredictionVisualizerNode(Node):
         )
         self._marker_z_offset_m = float(
             self.declare_parameter("visualization.marker_z_offset_m", 0.10).value
+        )
+        self._hide_unknown_terrain = bool(
+            self.declare_parameter(
+                "visualization.hide_unknown_terrain", True
+            ).value
         )
         self._label_height_m = float(
             self.declare_parameter("visualization.label_height_m", 0.45).value
@@ -86,21 +98,21 @@ class CanonicalPredictionVisualizerNode(Node):
         self._collision_warning_symbol_scale_m = float(
             self.declare_parameter("visualization.collision_warning_symbol_scale_m", 0.60).value
         )
-        self._validate_parameters(steps_topic, markers_topic)
+        self._validate_parameters(steps_topic, markers_topic, reference_path_topic)
 
         reliable = QoSProfile(depth=10)
         reliable.reliability = ReliabilityPolicy.RELIABLE
         sensor = QoSProfile(depth=10)
         sensor.reliability = ReliabilityPolicy.BEST_EFFORT
-        terrain_qos = QoSProfile(depth=1)
-        terrain_qos.reliability = ReliabilityPolicy.RELIABLE
-        terrain_qos.durability = DurabilityPolicy.TRANSIENT_LOCAL
         output_qos = QoSProfile(depth=1)
         output_qos.reliability = ReliabilityPolicy.RELIABLE
         output_qos.durability = DurabilityPolicy.TRANSIENT_LOCAL
 
         self._steps_publisher = self.create_publisher(DiagnosticArray, steps_topic, output_qos)
         self._markers_publisher = self.create_publisher(MarkerArray, markers_topic, output_qos)
+        self._reference_path_publisher = self.create_publisher(
+            Path, reference_path_topic, output_qos
+        )
         self._trajectory_subscription = self.create_subscription(
             Trajectory,
             self._trajectory_topic,
@@ -119,19 +131,11 @@ class CanonicalPredictionVisualizerNode(Node):
             self._on_prediction,
             reliable,
         )
-        self._terrain_subscription = self.create_subscription(
-            GridMap,
-            self._terrain_topic,
-            self._on_terrain,
-            terrain_qos,
-        )
-
         self._predictions = {}
         self._rendered = {}
         self._prediction_ready = False
         self._trajectories = {}
         self._geometries = {}
-        self._terrain_sampler = None
         self._last_warning_monotonic = 0.0
         self._status_subscription = self.create_subscription(
             DiagnosticArray, '/prediction/diagnostics', self._on_status, reliable
@@ -149,23 +153,29 @@ class CanonicalPredictionVisualizerNode(Node):
             post_callback=self._on_time_jump,
         )
         self.get_logger().info(
-            "canonical prediction visualization: %s + %s + %s -> %s"
+            "canonical prediction visualization: %s + %s + %s -> %s + %s"
             % (
                 self._trajectory_topic,
                 self._geometry_topic,
                 self._prediction_topic,
                 markers_topic,
+                reference_path_topic,
             )
         )
 
-    def _validate_parameters(self, steps_topic: str, markers_topic: str) -> None:
+    def _validate_parameters(
+        self,
+        steps_topic: str,
+        markers_topic: str,
+        reference_path_topic: str,
+    ) -> None:
         topics = (
             self._trajectory_topic,
             self._geometry_topic,
             self._prediction_topic,
-            self._terrain_topic,
             steps_topic,
             markers_topic,
+            reference_path_topic,
             self._map_frame,
         )
         if any(not value.strip() for value in topics):
@@ -204,12 +214,6 @@ class CanonicalPredictionVisualizerNode(Node):
         self._trim_cache(self._geometries)
         self._flush_pending()
 
-    def _on_terrain(self, message: GridMap) -> None:
-        try:
-            self._terrain_sampler = GridMapSampler(message)
-        except ValueError as error:
-            self._warn(f"Ignoring malformed terrain GridMap: {error}")
-
     def _on_prediction(self, message: PredictionOutput) -> None:
         if message.header.frame_id != self._map_frame:
             self._warn('Prediction frame mismatch')
@@ -230,6 +234,8 @@ class CanonicalPredictionVisualizerNode(Node):
             return
         requested = int(self._steps_publisher.get_subscription_count() > 0) | (
             int(self._markers_publisher.get_subscription_count() > 0) << 1
+        ) | (
+            int(self._reference_path_publisher.get_subscription_count() > 0) << 2
         )
         rendered = self._rendered.get(cycle, 0)
         if requested == 0 or rendered & requested == requested:
@@ -262,10 +268,10 @@ class CanonicalPredictionVisualizerNode(Node):
             )
             return
         predictions = self._join(trajectory, geometry, message)
-        header = Header(
-            stamp=message.header.stamp,
-            frame_id=self._map_frame,
-        )
+        # Presentation products share the source trajectory timestamp.  The
+        # runtime output stamp represents completion time and can lag the raw
+        # future path by one or more SVO frames.
+        header = Header(stamp=trajectory.header.stamp, frame_id=self._map_frame)
         if self._steps_publisher.get_subscription_count():
             self._steps_publisher.publish(
                 predictions_to_diagnostics(
@@ -289,6 +295,16 @@ class CanonicalPredictionVisualizerNode(Node):
                     collision_warning_triangle_size_m=(self._collision_warning_triangle_size_m),
                     collision_warning_line_width_m=(self._collision_warning_line_width_m),
                     collision_warning_symbol_scale_m=(self._collision_warning_symbol_scale_m),
+                    hide_unknown_terrain=self._hide_unknown_terrain,
+                )
+            )
+        if self._reference_path_publisher.get_subscription_count():
+            self._reference_path_publisher.publish(
+                predictions_to_reference_path(
+                    predictions,
+                    header,
+                    marker_z_offset_m=self._marker_z_offset_m,
+                    hide_unknown_terrain=self._hide_unknown_terrain,
                 )
             )
 
@@ -311,7 +327,7 @@ class CanonicalPredictionVisualizerNode(Node):
             if previous_xy is not None:
                 distance += math.hypot(xy[0] - previous_xy[0], xy[1] - previous_xy[1])
             previous_xy = xy
-            terrain = self._terrain_for_step(xy[0], xy[1], geometry_by_id.get(int(step.step_id)))
+            terrain = self._terrain_for_step(geometry_by_id.get(int(step.step_id)))
             collision = collision_by_id.get(int(step.step_id))
             candidates = [] if collision is None else collision.collision_objects
             objects = intersecting_collision_objects(candidates)
@@ -387,7 +403,7 @@ class CanonicalPredictionVisualizerNode(Node):
             )
         return predictions
 
-    def _terrain_for_step(self, x_value, y_value, geometry_step):
+    def _terrain_for_step(self, geometry_step):
         if geometry_step is None:
             return TerrainSample(valid=False)
         vector = (
@@ -402,11 +418,12 @@ class CanonicalPredictionVisualizerNode(Node):
         if normal[2] < 0.0:
             normal = tuple(-value for value in normal)
         slope = math.degrees(math.acos(max(-1.0, min(1.0, normal[2]))))
-        elevation = 0.0
-        if self._terrain_sampler is not None:
-            sampled = self._terrain_sampler.sample(x_value, y_value)
-            if sampled.valid:
-                elevation = sampled.elevation_m
+        elevation = (
+            float(geometry_step.elevation_m)
+            if geometry_step.elevation_valid
+            and math.isfinite(float(geometry_step.elevation_m))
+            else 0.0
+        )
         return TerrainSample(
             valid=True,
             elevation_m=elevation,
@@ -425,7 +442,6 @@ class CanonicalPredictionVisualizerNode(Node):
         self._prediction_ready = False
         self._trajectories.clear()
         self._geometries.clear()
-        self._terrain_sampler = None
         self._clear_presentation()
 
     def _clear_presentation(self):
@@ -434,6 +450,7 @@ class CanonicalPredictionVisualizerNode(Node):
             frame_id=self._map_frame,
         )
         self._steps_publisher.publish(DiagnosticArray(header=header))
+        self._reference_path_publisher.publish(Path(header=header))
         self._markers_publisher.publish(
             MarkerArray(
                 markers=[

@@ -63,7 +63,7 @@ def _create_database(path: Path, *, start_us=1_000_000) -> None:
     connection.close()
 
 
-def _identity_trajectory(gps_stamps, gps_positions):
+def _identity_trajectory(gps_stamps, gps_positions, gps_speeds=None):
     return MavlinkTrajectory(
         path=Path("test.db"),
         gps_stamps_ns=np.asarray(gps_stamps, dtype=np.int64),
@@ -73,6 +73,11 @@ def _identity_trajectory(gps_stamps, gps_positions):
         ),
         attitude_orientations_xyzw=np.tile(
             np.array([0.0, 0.0, 0.0, 1.0]), (2, 1)
+        ),
+        gps_speeds_mps=(
+            None
+            if gps_speeds is None
+            else np.asarray(gps_speeds, dtype=np.float64)
         ),
     )
 
@@ -268,3 +273,66 @@ def test_future_samples_start_now_and_stop_at_gap_radius_and_limit():
     ]
     assert samples[0].position == pytest.approx([0.1, 0.0, 0.0])
     assert samples[-1].position == pytest.approx([1.0, 0.0, 0.0])
+
+
+def test_future_samples_use_along_path_budget_and_time_horizon():
+    """Loops cannot extend a short look-ahead into a long future history."""
+    trajectory = _identity_trajectory(
+        [0, SECOND, 2 * SECOND, 3 * SECOND, 4 * SECOND],
+        [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [1.0, 1.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0],
+        ],
+    )
+
+    distance_limited = trajectory.future_samples(
+        1,
+        radius_m=2.5,
+        step_m=0.2,
+        max_gps_gap_ns=2 * SECOND,
+        max_points=100,
+        max_horizon_ns=10 * SECOND,
+    )
+    time_limited = trajectory.future_samples(
+        1,
+        radius_m=10.0,
+        step_m=0.2,
+        max_gps_gap_ns=2 * SECOND,
+        max_points=100,
+        max_horizon_ns=SECOND,
+    )
+
+    assert [sample.stamp_ns for sample in distance_limited] == [1, SECOND, 2 * SECOND]
+    assert [sample.stamp_ns for sample in time_limited] == [1, SECOND]
+
+
+def test_future_samples_reject_stationary_jitter_and_speed_outlier():
+    """Reported stops and impossible jumps do not become path vertices."""
+    trajectory = _identity_trajectory(
+        [0, SECOND, 2 * SECOND, 3 * SECOND, 4 * SECOND],
+        [
+            [0.0, 0.0, 0.0],
+            [0.25, 0.0, 0.0],
+            [-0.25, 0.0, 0.0],
+            [10.0, 0.0, 0.0],
+            [0.4, 0.0, 0.0],
+        ],
+        gps_speeds=[0.0, 0.0, 0.0, 20.0, 0.4],
+    )
+
+    samples = trajectory.future_samples(
+        1,
+        radius_m=5.0,
+        step_m=0.2,
+        max_gps_gap_ns=2 * SECOND,
+        max_points=100,
+        max_horizon_ns=10 * SECOND,
+        stationary_speed_mps=0.1,
+        max_speed_mps=5.0,
+    )
+
+    assert [sample.stamp_ns for sample in samples] == [1, 4 * SECOND]
+    assert samples[-1].position == pytest.approx([0.4, 0.0, 0.0])

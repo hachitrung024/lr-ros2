@@ -70,8 +70,10 @@ automatically. Later runs reuse the cache immediately. Set
 future_path_rebuild_cache to true to force preprocessing again, or set
 future_path_cache_dir to choose another cache root.
 
-The output is a nav_msgs/msg/Path on /lr/future_path/ground_truth, sampled at
-0.2 m until the cached path first leaves a 15 m XY radius. It is future
+The output is a nav_msgs/msg/Path on /lr/future_path/ground_truth. By default
+it is sampled every 0.2 m and bounded by both 15 m of cumulative XY travel and
+20 seconds. Small sub-step fluctuations are not accumulated into fake travel,
+so loops and stationary jitter cannot create an unbounded path. It is future
 ground-truth for offline evaluation only, not a route planner or a control
 input.
 
@@ -106,6 +108,12 @@ created. Pose, TF, and Path are suppressed across valid-GPS gaps larger than
 `mavlink_max_gps_gap_s` (default 1.5 s), then resume automatically. This is
 recorded ground truth for offline visualization/evaluation, not a planned
 route or a control input.
+
+MAVLink path sampling also excludes reported stationary samples at or below
+0.1 m/s and rejects reported or position-derived speeds above 5 m/s. Configure
+the window and gates with `future_path_radius_m`, `future_path_horizon_s`,
+`future_path_step_m`, `future_path_stationary_speed_mps`, and
+`future_path_max_speed_mps`.
 
 For stereo cameras the launch file also starts `lr_terrain_geometry` by
 default. Use `start_terrain_node:=false` to disable it, or override

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import math
 import sys
 import time
 from typing import Callable
@@ -87,6 +88,15 @@ class MavlinkPoseNode(Node):
         self._step_m = float(
             self.declare_parameter("step_m", 0.2).value
         )
+        horizon_s = float(
+            self.declare_parameter("horizon_s", 20.0).value
+        )
+        self._stationary_speed_mps = float(
+            self.declare_parameter("stationary_speed_mps", 0.1).value
+        )
+        self._max_speed_mps = float(
+            self.declare_parameter("max_speed_mps", 5.0).value
+        )
         self._max_points = int(
             self.declare_parameter("max_points", 1000).value
         )
@@ -103,8 +113,18 @@ class MavlinkPoseNode(Node):
                 "match_tolerance_s must be non-negative and "
                 "max_gps_gap_s must be positive"
             )
-        if self._radius_m <= 0.0 or self._step_m <= 0.0:
-            raise ValueError("radius_m and step_m must be positive")
+        if not all(
+            math.isfinite(value)
+            for value in (self._radius_m, self._step_m, horizon_s)
+        ) or any(value <= 0.0 for value in (self._radius_m, self._step_m, horizon_s)):
+            raise ValueError("radius_m, step_m, and horizon_s must be positive")
+        if (
+            not math.isfinite(self._stationary_speed_mps)
+            or not math.isfinite(self._max_speed_mps)
+            or self._stationary_speed_mps < 0.0
+            or self._max_speed_mps <= self._stationary_speed_mps
+        ):
+            raise ValueError("GPS speed thresholds are invalid")
         if self._max_points < 1:
             raise ValueError("max_points must be at least one")
         if (
@@ -121,6 +141,7 @@ class MavlinkPoseNode(Node):
         self._max_gps_gap_ns = int(
             round(max_gps_gap_s * 1_000_000_000)
         )
+        self._horizon_ns = int(round(horizon_s * 1_000_000_000))
         self._edge_tolerance_ns = 1_000_000_000
         self._session_selector = session_selector
         self._trajectory_loader = trajectory_loader
@@ -248,6 +269,9 @@ class MavlinkPoseNode(Node):
                 step_m=self._step_m,
                 max_gps_gap_ns=self._max_gps_gap_ns,
                 max_points=self._max_points,
+                max_horizon_ns=self._horizon_ns,
+                stationary_speed_mps=self._stationary_speed_mps,
+                max_speed_mps=self._max_speed_mps,
                 edge_tolerance_ns=self._edge_tolerance_ns,
             )
             if samples:

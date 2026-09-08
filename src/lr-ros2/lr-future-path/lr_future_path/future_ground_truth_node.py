@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import math
 import time
 
 from geometry_msgs.msg import PoseStamped
@@ -53,6 +54,9 @@ class FutureGroundTruthNode(Node):
         self._step_m = float(
             self.declare_parameter("step_m", 0.2).value
         )
+        horizon_s = float(
+            self.declare_parameter("horizon_s", 20.0).value
+        )
         max_gap_s = float(
             self.declare_parameter("max_gap_s", 1.0).value
         )
@@ -64,8 +68,11 @@ class FutureGroundTruthNode(Node):
         self._max_points = int(
             self.declare_parameter("max_points", 1000).value
         )
-        if self._radius_m <= 0.0 or self._step_m <= 0.0:
-            raise ValueError("radius_m and step_m must be positive")
+        if not all(
+            math.isfinite(value)
+            for value in (self._radius_m, self._step_m, horizon_s)
+        ) or any(value <= 0.0 for value in (self._radius_m, self._step_m, horizon_s)):
+            raise ValueError("radius_m, step_m, and horizon_s must be positive")
         if max_gap_s <= 0.0 or alignment_tolerance_s <= 0.0:
             raise ValueError(
                 "max_gap_s and alignment_tolerance_s must be positive"
@@ -88,6 +95,7 @@ class FutureGroundTruthNode(Node):
         else:
             self._series = pose_series
         self._max_gap_ns = int(round(max_gap_s * 1_000_000_000))
+        self._horizon_ns = int(round(horizon_s * 1_000_000_000))
         self._alignment_tolerance_ns = int(
             round(alignment_tolerance_s * 1_000_000_000)
         )
@@ -109,12 +117,13 @@ class FutureGroundTruthNode(Node):
         )
         self.get_logger().info(
             "Future ground truth: input=%s output=%s cache_poses=%d "
-            "radius=%.1f m step=%.2f m"
+            "distance=%.1f m horizon=%.1f s step=%.2f m"
             % (
                 input_topic,
                 output_topic,
                 len(self._series.stamps_ns),
                 self._radius_m,
+                horizon_s,
                 self._step_m,
             )
         )
@@ -166,6 +175,7 @@ class FutureGroundTruthNode(Node):
                 step_m=self._step_m,
                 max_gap_ns=self._max_gap_ns,
                 max_points=self._max_points,
+                max_horizon_ns=self._horizon_ns,
             )
             message = self._build_path(
                 current,

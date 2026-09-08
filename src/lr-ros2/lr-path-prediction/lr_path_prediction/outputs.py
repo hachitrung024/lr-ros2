@@ -5,7 +5,8 @@ from __future__ import annotations
 import math
 
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
-from geometry_msgs.msg import Point
+from geometry_msgs.msg import Point, PoseStamped
+from nav_msgs.msg import Path
 from std_msgs.msg import ColorRGBA, Header
 from visualization_msgs.msg import Marker, MarkerArray
 
@@ -135,6 +136,7 @@ def predictions_to_markers(
     collision_warning_triangle_size_m: float = 0.9,
     collision_warning_line_width_m: float = 0.08,
     collision_warning_symbol_scale_m: float = 0.60,
+    hide_unknown_terrain: bool = True,
 ) -> MarkerArray:
     """Build path points, slope UI, one collision warning, and normals."""
     output = MarkerArray()
@@ -142,7 +144,10 @@ def predictions_to_markers(
     clear.header = header
     clear.action = Marker.DELETEALL
     output.markers.append(clear)
-    if not predictions:
+    visible_predictions = _terrain_visible_prefix(
+        predictions, hide_unknown_terrain=hide_unknown_terrain
+    )
+    if not visible_predictions:
         return output
 
     line = _base_marker(header, "prediction_path", 0, Marker.LINE_STRIP)
@@ -151,9 +156,9 @@ def predictions_to_markers(
     points.scale.x = 0.22
     points.scale.y = 0.22
     points.scale.z = 0.22
-    nearest_collision = _nearest_collision_prediction(predictions)
+    nearest_collision = _nearest_collision_prediction(visible_predictions)
 
-    for prediction in predictions:
+    for prediction in visible_predictions:
         is_nearest_collision = prediction is nearest_collision
         point_color = _display_color(
             prediction,
@@ -225,6 +230,46 @@ def predictions_to_markers(
     output.markers.insert(1, line)
     output.markers.insert(2, points)
     return output
+
+
+def predictions_to_reference_path(
+    predictions: list[StepPrediction],
+    header: Header,
+    *,
+    marker_z_offset_m: float,
+    hide_unknown_terrain: bool = True,
+) -> Path:
+    """Build the exact cycle-matched path used by prediction markers."""
+    message = Path(header=header)
+    visible_predictions = _terrain_visible_prefix(
+        predictions, hide_unknown_terrain=hide_unknown_terrain
+    )
+    for prediction in visible_predictions:
+        pose = PoseStamped(header=header)
+        pose.pose.position = _display_position(prediction, marker_z_offset_m)
+        yaw = prediction.rover_yaw_rad
+        if not math.isfinite(yaw):
+            yaw = 0.0
+        pose.pose.orientation.z = math.sin(yaw * 0.5)
+        pose.pose.orientation.w = math.cos(yaw * 0.5)
+        message.poses.append(pose)
+    return message
+
+
+def _terrain_visible_prefix(
+    predictions: list[StepPrediction],
+    *,
+    hide_unknown_terrain: bool,
+) -> list[StepPrediction]:
+    """Keep only the continuous terrain-covered prediction horizon."""
+    if not hide_unknown_terrain:
+        return predictions
+    visible = []
+    for prediction in predictions:
+        if not prediction.terrain.valid:
+            break
+        visible.append(prediction)
+    return visible
 
 
 def _risk(

@@ -57,6 +57,7 @@ def visualizer():
     node = CanonicalPredictionVisualizerNode()
     node._markers_publisher = Publisher()
     node._steps_publisher = Publisher()
+    node._reference_path_publisher = Publisher()
     yield node
     node.destroy_node()
     rclpy.shutdown()
@@ -74,7 +75,10 @@ def sample_inputs():
         steps=[GeometryStep(step_id=0, plane_id='p')],
     )
     geometry.steps[0].normal.z = 1.0
-    output = PredictionOutput(header=header, source_trajectory_id=7)
+    geometry.steps[0].elevation_m = 0.4
+    geometry.steps[0].elevation_valid = True
+    output_header = Header(frame_id='map', stamp=Time(sec=11))
+    output = PredictionOutput(header=output_header, source_trajectory_id=7)
     return trajectory, geometry, output
 
 
@@ -85,8 +89,12 @@ def test_output_before_inputs_is_joined_and_clock_jump_clears_warning(visualizer
     visualizer._on_trajectory(trajectory)
     visualizer._on_geometry(geometry)
     assert len(visualizer._markers_publisher.messages) == 1
+    reference = visualizer._reference_path_publisher.messages[-1]
+    assert reference.header.stamp.sec == 10
+    assert reference.poses[0].pose.position.z == pytest.approx(0.5)
     visualizer._on_time_jump(None)
     assert visualizer._markers_publisher.messages[-1].markers[0].action == Marker.DELETEALL
+    assert not visualizer._reference_path_publisher.messages[-1].poses
     assert not visualizer._predictions
 
 

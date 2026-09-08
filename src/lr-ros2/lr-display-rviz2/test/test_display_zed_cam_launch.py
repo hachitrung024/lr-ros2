@@ -17,6 +17,7 @@
 import importlib.util
 from pathlib import Path
 
+import pytest
 from launch import LaunchContext
 from launch.actions import ExecuteProcess, IncludeLaunchDescription
 from launch.utilities import (
@@ -51,6 +52,9 @@ def _context(**overrides):
         "future_path_topic": "/lr/future_path/ground_truth",
         "future_path_radius_m": "15.0",
         "future_path_step_m": "0.2",
+        "future_path_horizon_s": "20.0",
+        "future_path_stationary_speed_mps": "0.1",
+        "future_path_max_speed_mps": "5.0",
         "mavlink": "false",
         "mavlink_dir": "mavlink",
         "mavlink_db_path": "",
@@ -192,6 +196,27 @@ def test_invalid_mavlink_extrinsic_is_rejected():
     message = _substitution_text(context, actions[0].msg)
 
     assert "mavlink_body_to_camera" in message
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"future_path_horizon_s": "0"},
+        {
+            "future_path_stationary_speed_mps": "1.0",
+            "future_path_max_speed_mps": "1.0",
+        },
+    ],
+)
+def test_invalid_future_path_window_is_rejected(overrides):
+    """Distance/time windows and GPS gates must be physically valid."""
+    module = _load_launch_module()
+    context = _context(future_path="true", **overrides)
+
+    actions = module.launch_setup(context)
+
+    message = _substitution_text(context, actions[0].msg)
+    assert "Future-path" in message
 
 
 def test_headless_launch_and_auto_disable():

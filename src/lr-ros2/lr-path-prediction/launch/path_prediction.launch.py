@@ -89,7 +89,6 @@ def generate_launch_description():
                 parameters=[
                     LaunchConfiguration("prediction_params_file"),
                     {
-                        "input.terrain_topic": LaunchConfiguration("terrain_topic"),
                         "frames.map_frame": map_frame,
                         "use_sim_time": use_sim_time,
                     },

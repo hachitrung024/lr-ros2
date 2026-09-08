@@ -73,6 +73,7 @@ class MavlinkTrajectory:
     gps_positions: np.ndarray
     attitude_stamps_ns: np.ndarray
     attitude_orientations_xyzw: np.ndarray
+    gps_speeds_mps: np.ndarray | None = None
 
     def __post_init__(self) -> None:
         """Validate trajectory shapes and strict timestamp ordering."""
@@ -92,6 +93,10 @@ class MavlinkTrajectory:
             raise MavlinkDataError(
                 "attitude orientations must have shape (N, 4)"
             )
+        if self.gps_speeds_mps is not None and self.gps_speeds_mps.shape != (
+            gps_count,
+        ):
+            raise MavlinkDataError("GPS speeds must have shape (N,)")
         if np.any(np.diff(self.gps_stamps_ns) <= 0):
             raise MavlinkDataError(
                 "GPS timestamps must be strictly increasing"
@@ -140,15 +145,27 @@ class MavlinkTrajectory:
         step_m: float,
         max_gps_gap_ns: int,
         max_points: int,
+        max_horizon_ns: int | None = None,
+        stationary_speed_mps: float = 0.0,
+        max_speed_mps: float = math.inf,
         edge_tolerance_ns: int = NANOSECONDS_PER_SECOND,
     ) -> list[PoseSample]:
-        """Sample a future GPS path beginning at the exact current pose."""
+        """Sample a bounded, noise-resistant future GPS path."""
         if radius_m <= 0.0 or step_m <= 0.0:
             raise ValueError("radius_m and step_m must be positive")
         if max_gps_gap_ns <= 0:
             raise ValueError("max_gps_gap_ns must be positive")
         if max_points < 1:
             raise ValueError("max_points must be at least one")
+        if max_horizon_ns is not None and max_horizon_ns <= 0:
+            raise ValueError("max_horizon_ns must be positive when provided")
+        if (
+            not math.isfinite(stationary_speed_mps)
+            or stationary_speed_mps < 0.0
+            or math.isnan(max_speed_mps)
+            or max_speed_mps <= stationary_speed_mps
+        ):
+            raise ValueError("GPS speed thresholds are invalid")
 
         current = self.pose_at(
             stamp_ns,
@@ -165,9 +182,9 @@ class MavlinkTrajectory:
             self.gps_stamps_ns, stamp_ns, side="right"
         ))
         last_selected_position = current.position
-        previous_position = current.position
-        distance_since_sample = 0.0
-        last_valid: PoseSample | None = None
+        last_plausible_position = current.position
+        last_plausible_stamp = int(stamp_ns)
+        path_distance = 0.0
 
         for index in range(first_future, len(self.gps_stamps_ns)):
             if index > 0 and (
@@ -179,6 +196,40 @@ class MavlinkTrajectory:
             ):
                 break
             sample_stamp = int(self.gps_stamps_ns[index])
+            if (
+                max_horizon_ns is not None
+                and sample_stamp - stamp_ns > max_horizon_ns
+            ):
+                break
+            position = self.gps_positions[index]
+            elapsed = (sample_stamp - last_plausible_stamp) / 1e9
+            displacement = float(
+                np.linalg.norm(position[:2] - last_plausible_position[:2])
+            )
+            inferred_speed = displacement / elapsed if elapsed > 0.0 else math.inf
+            reported_speed = (
+                math.nan
+                if self.gps_speeds_mps is None
+                else float(self.gps_speeds_mps[index])
+            )
+            if inferred_speed > max_speed_mps or (
+                math.isfinite(reported_speed) and reported_speed > max_speed_mps
+            ):
+                continue
+            last_plausible_position = position
+            last_plausible_stamp = sample_stamp
+            if (
+                math.isfinite(reported_speed)
+                and reported_speed <= stationary_speed_mps
+            ):
+                continue
+            distance_from_selected = float(
+                np.linalg.norm(position[:2] - last_selected_position[:2])
+            )
+            if distance_from_selected < step_m:
+                continue
+            if path_distance + distance_from_selected > radius_m:
+                break
             orientation = _interpolate_orientation(
                 self.attitude_stamps_ns,
                 self.attitude_orientations_xyzw,
@@ -187,30 +238,11 @@ class MavlinkTrajectory:
             )
             if orientation is None:
                 break
-            position = self.gps_positions[index]
-            radial_distance = float(
-                np.linalg.norm(position[:2] - current.position[:2])
-            )
-            if radial_distance > radius_m:
-                break
-            distance_since_sample += float(
-                np.linalg.norm(position[:2] - previous_position[:2])
-            )
-            previous_position = position
-            last_valid = PoseSample(sample_stamp, position, orientation)
-            if distance_since_sample >= step_m:
-                selected.append(last_valid)
-                last_selected_position = position
-                distance_since_sample = 0.0
-                if len(selected) >= max_points:
-                    return selected
-
-        if (
-            last_valid is not None
-            and len(selected) < max_points
-            and not np.array_equal(last_valid.position, last_selected_position)
-        ):
-            selected.append(last_valid)
+            selected.append(PoseSample(sample_stamp, position, orientation))
+            last_selected_position = position
+            path_distance += distance_from_selected
+            if len(selected) >= max_points:
+                return selected
         return selected
 
 
@@ -369,9 +401,12 @@ def load_trajectory(path: str | Path) -> MavlinkTrajectory:
     summary = inspect_session(path)
     try:
         with _readonly_connection(summary.path) as connection:
+            velocity_column = (
+                "vel" if "vel" in _table_columns(connection, "gps") else "NULL"
+            )
             gps_rows = _strict_rows(connection.execute(
-                """
-                SELECT t_wall_epoch_us, lat, lon, alt
+                f"""
+                SELECT t_wall_epoch_us, lat, lon, alt, {velocity_column}
                 FROM gps
                 WHERE lat IS NOT NULL AND lon IS NOT NULL
                   AND alt IS NOT NULL AND lat != 0 AND lon != 0
@@ -406,6 +441,10 @@ def load_trajectory(path: str | Path) -> MavlinkTrajectory:
         dtype=np.float64,
     )
     gps_positions = geodetic_to_enu(geodetic, geodetic[0])
+    gps_speeds = np.asarray(
+        [math.nan if row[4] is None else float(row[4]) for row in gps_rows],
+        dtype=np.float64,
+    )
     attitude_stamps = np.asarray(
         [int(row[0]) * MICROSECONDS_TO_NANOSECONDS for row in attitude_rows],
         dtype=np.int64,
@@ -425,6 +464,7 @@ def load_trajectory(path: str | Path) -> MavlinkTrajectory:
         gps_positions=gps_positions,
         attitude_stamps_ns=attitude_stamps,
         attitude_orientations_xyzw=attitude_orientations,
+        gps_speeds_mps=gps_speeds,
     )
 
 
