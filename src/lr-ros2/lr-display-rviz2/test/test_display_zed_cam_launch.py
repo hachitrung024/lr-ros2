@@ -147,6 +147,8 @@ def test_prediction_auto_starts_with_all_three_inputs():
         _substitution_text(context, args['prediction_runtime_params_file']) == '/tmp/runtime.yaml'
     )
     assert _substitution_text(context, args['bridge_params_file']) == '/tmp/bridge.yaml'
+    assert args['objects_topic'] == '/segmentation/tracked_footprints'
+    assert args['objects_input_type'] == 'tracked_objects'
     assert not any('adapter_node' in exe for exe in _node_executables(actions))
 
 

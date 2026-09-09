@@ -6,7 +6,7 @@
 |---|---|
 | `/lr/future_path/ground_truth` | `/trajectory`, at most 20 poses per cycle |
 | `/terrain_geometry/grid_map` | `/geometry`, sampled directly at those poses |
-| `/segmentation/boxes_3d` | `/tracked_objects`, oriented XY footprints |
+| `/segmentation/tracked_footprints` | `/tracked_objects`, mask-derived XY polygons |
 | `/lr/mavlink/pose` | `/rover/state`, dynamic profile only |
 
 The standalone and display prediction launches use this consolidated node.
@@ -25,9 +25,11 @@ the newest map at or before each trajectory, at most 2 s old by default.
 `GeometryArray.header.stamp` retains the GridMap timestamp; its separate source
 ID/stamp reference the trajectory. Unknown terrain stays unknown.
 
-All source frames must be explicit. Path/pose/GridMap must match the configured
-frame; boxes can be transformed using timestamped TF. A TF miss is retried up
-to `tracked_objects.tf_timeout_sec` without blocking other bridge inputs.
+All source frames must be explicit. Path/pose/GridMap and canonical polygons
+must match the configured frame. Set `tracked_objects.input_type` to
+`tracked_objects` to validate and forward polygons, or keep `detection3d` to
+convert boxes using timestamped TF. A box TF miss is retried up to
+`tracked_objects.tf_timeout_sec` without blocking other bridge inputs.
 `force_frame_id_map` is accepted in compatibility YAMLs but no longer relabels
 coordinates. Missing TF and malformed detections are reported, not published
 as a valid empty object batch.

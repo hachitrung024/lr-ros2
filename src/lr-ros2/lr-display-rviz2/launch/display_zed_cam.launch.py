@@ -405,6 +405,7 @@ def launch_setup(context, *args, **kwargs):
                         f'/{camera_name_val}/zed_node/' 'rgb/color/rect/camera_info'
                     ),
                     'output.box_topic': '/segmentation/boxes_3d',
+                    'output.footprint_topic': '/segmentation/tracked_footprints',
                     'output.frame_id': map_frame,
                     'geometry.up_axis': [0.0, 0.0, 1.0],
                     'use_sim_time': publish_svo_clock,
@@ -433,7 +434,8 @@ def launch_setup(context, *args, **kwargs):
                     'rover_config': prediction_rover_config,
                     'path_topic': future_path_topic,
                     'terrain_topic': '/terrain_geometry/grid_map',
-                    'objects_topic': '/segmentation/boxes_3d',
+                    'objects_topic': '/segmentation/tracked_footprints',
+                    'objects_input_type': 'tracked_objects',
                     'pose_topic': mavlink_pose_topic,
                     'map_frame': map_frame,
                     'use_sim_time': publish_svo_clock,

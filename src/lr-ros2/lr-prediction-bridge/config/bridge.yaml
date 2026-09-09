@@ -14,6 +14,7 @@ prediction_bridge_node:
     geometry.allow_flat_fallback: false
     geometry.max_geometry_age_sec: 2.0
     tracked_objects.input_topic: /segmentation/boxes_3d
+    tracked_objects.input_type: detection3d
     tracked_objects.output_topic: /tracked_objects
     tracked_objects.tf_timeout_sec: 0.2
     rover_state.pose_topic: /lr/mavlink/pose
@@ -60,6 +61,7 @@ empty_objects_bridge_node:
 tracked_objects_adapter_node:
   ros__parameters:
     input_topic: /segmentation/boxes_3d
+    input_type: detection3d
     output_topic: /tracked_objects
     expected_frame_id: map
     tf_timeout_sec: 0.2

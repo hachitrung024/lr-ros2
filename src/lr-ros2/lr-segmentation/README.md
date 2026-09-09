@@ -1,8 +1,8 @@
 # LR Segmentation
 
 ROS 2 Humble nodes that run an Ultralytics segmentation model on ZED RGB,
-publish a rendered overlay and instance-label image, then estimate tracked,
-light-weight oriented 3D boxes from the masks and registered depth.
+publish a rendered overlay and instance-label image, then estimate tracked 3D
+boxes and map-frame XY footprints from the masks and registered depth.
 
 ## Install
 
@@ -35,16 +35,25 @@ image-domain segmentation node.
   background; positive values are per-frame instance IDs.
 - `/segmentation/boxes_3d`: `vision_msgs/msg/Detection3DArray`. Every detection
   contains an oriented metric `BoundingBox3D` and a stable tracker ID.
+- `/segmentation/tracked_footprints`:
+  `safety_perception_msgs/msg/TrackedObjectArray`. Each object contains the
+  mask point cloud's concave XY occupancy boundary and the same tracker ID as
+  its 3D box.
 - `/segmentation/box_markers`: `visualization_msgs/msg/MarkerArray` for RViz
-  only; it contains lightly filled cubes, bold oriented wireframes, and their
-  tracker IDs.
+  only; it contains translucent vertical polygon prisms, prism wireframes, and
+  tracker IDs. Their bottom and top use robust Z limits from the mask points.
 
 The default wireframe is 0.07 m thick and uses Reliable QoS. Its width, fill
 alpha, and label size are configurable with the `visualization.*` parameters in
 `config/segmentation.yaml`.
 
 The estimator synchronizes mask and depth within 50 ms. It filters depth
-outliers, fits an oriented box with a gravity-aligned vertical axis, and applies
-a constant-velocity Kalman filter. The default output frame is `map`; set
+outliers, fits an oriented box, projects the mask points onto a 2 cm XY grid,
+closes small depth gaps, keeps the largest connected component, and simplifies
+its concave boundary. A box footprint is used if the projected visible surface
+is degenerate. Both shapes follow a constant-velocity Kalman track. Rectangular
+box markers are hidden by default with `visualization.show_boxes: false`; the
+`/segmentation/boxes_3d` compatibility topic remains available. The default
+output frame is `map`; set
 `box_frame:=<camera_optical_frame>` and configure `geometry.up_axis` if no
 world-frame TF is available.

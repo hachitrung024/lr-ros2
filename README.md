@@ -69,7 +69,7 @@ The adapters perform these conversions:
 |---|---|
 | `/lr/future_path/ground_truth` (`nav_msgs/Path`) | `/trajectory` (`safety_perception_msgs/Trajectory`) |
 | `/terrain_geometry/grid_map` (`grid_map_msgs/GridMap`) | `/geometry` (`safety_perception_msgs/GeometryArray`) |
-| `/segmentation/boxes_3d` (`vision_msgs/Detection3DArray`) | `/tracked_objects` (`safety_perception_msgs/TrackedObjectArray`) |
+| `/segmentation/tracked_footprints` (`safety_perception_msgs/TrackedObjectArray`) | `/tracked_objects` (`safety_perception_msgs/TrackedObjectArray`) |
 | `/lr/mavlink/pose` (`geometry_msgs/PoseStamped`) | `/rover/state` (`safety_perception_msgs/RoverState`), dynamic only |
 
 The visualizer publishes `/lr/path_prediction/reference_path` only after the
@@ -240,6 +240,7 @@ are recorded when published by that version. See
 /lr/future_path/ground_truth
 /segmentation/overlay
 /segmentation/boxes_3d
+/segmentation/tracked_footprints
 /terrain_geometry/grid_map
 /terrain_geometry/markers
 /trajectory

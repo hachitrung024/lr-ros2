@@ -13,6 +13,7 @@ box_estimator_3d:
     input.depth_topic: /zed/zed_node/depth/depth_registered
     input.camera_info_topic: /zed/zed_node/rgb/color/rect/camera_info
     output.box_topic: /segmentation/boxes_3d
+    output.footprint_topic: /segmentation/tracked_footprints
     output.marker_topic: /segmentation/box_markers
     output.frame_id: map
     geometry.up_axis: [0.0, 0.0, 1.0]
@@ -28,9 +29,19 @@ box_estimator_3d:
     minimum_depth_band_m: 0.15
     box.trim_fraction: 0.02
     box.minimum_size_m: 0.05
+    footprint.voxel_size_m: 0.02
+    footprint.simplify_tolerance_m: 0.02
+    footprint.minimum_area_m2: 0.01
+    footprint.maximum_vertices: 32
+    footprint.closing_radius_m: 0.06
+    footprint.minimum_thickness_m: 0.04
+    footprint.minimum_height_m: 0.10
+    visualization.show_boxes: false
     visualization.box_line_width_m: 0.07
     visualization.box_fill_alpha: 0.12
     visualization.label_scale_m: 0.28
+    visualization.footprint_z_offset_m: 0.03
+    visualization.footprint_prism_fill_alpha: 0.18
     tracking.association_distance_m: 1.0
     tracking.max_missed_frames: 5
     tracking.min_confirmations: 2

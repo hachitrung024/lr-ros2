@@ -9,7 +9,13 @@ from nav_msgs.msg import Path
 import pytest
 import rclpy
 from rclpy.parameter import Parameter
-from safety_perception_msgs.msg import Trajectory, TrajectoryStep
+from safety_perception_msgs.msg import (
+    Point2D,
+    TrackedObject,
+    TrackedObjectArray,
+    Trajectory,
+    TrajectoryStep,
+)
 from std_msgs.msg import Float32MultiArray, MultiArrayDimension
 from vision_msgs.msg import Detection3D, Detection3DArray, ObjectHypothesisWithPose
 
@@ -168,6 +174,53 @@ def detections(frame='camera'):
     box.results = [hypothesis]
     message.detections = [box]
     return message
+
+
+def tracked_objects(frame='map'):
+    message = TrackedObjectArray(header=pose(10, frame=frame).header)
+    tracked_object = TrackedObject(track_id=42, class_name='rock')
+    tracked_object.footprint_polygon_xy = [
+        Point2D(x=-1.0, y=-1.0),
+        Point2D(x=1.0, y=-1.0),
+        Point2D(x=1.0, y=1.0),
+        Point2D(x=-1.0, y=1.0),
+    ]
+    message.objects = [tracked_object]
+    return message
+
+
+def test_canonical_polygon_input_is_validated_and_republished(ros):
+    node = TrackedObjectsAdapterNode(
+        parameter_overrides=[Parameter('input_type', value='tracked_objects')]
+    )
+    published = []
+    node._objects_pub = SimpleNamespace(publish=published.append)
+    try:
+        message = tracked_objects()
+        node._on_tracked_objects(message)
+        assert published == [message]
+        assert node._tf_buffer is None
+
+        invalid = tracked_objects()
+        invalid.objects[0].footprint_polygon_xy = [Point2D(x=0.0, y=0.0)] * 3
+        node._on_tracked_objects(invalid)
+        assert published == [message]
+
+        self_intersecting = tracked_objects()
+        self_intersecting.objects[0].footprint_polygon_xy = [
+            Point2D(x=0.0, y=0.0),
+            Point2D(x=3.0, y=3.0),
+            Point2D(x=0.0, y=2.0),
+            Point2D(x=2.0, y=0.0),
+        ]
+        node._on_tracked_objects(self_intersecting)
+        assert published == [message]
+
+        wrong_frame = tracked_objects(frame='odom')
+        node._on_tracked_objects(wrong_frame)
+        assert published == [message]
+    finally:
+        node.destroy_node()
 
 
 def test_missing_tf_retries_without_emitting_empty_then_preserves_track(ros, monkeypatch):

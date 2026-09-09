@@ -1,6 +1,7 @@
 """One bridge node, with small compatibility wrappers for individual roles."""
 
 from collections import deque
+import math
 import time
 
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
@@ -104,26 +105,44 @@ class PredictionBridgeNode(Node):
                     reliable,
                 )
         if 'tracked_objects' in roles:
+            self._objects_input_type = self._param(
+                'tracked_objects', 'input_type', 'detection3d'
+            )
+            if self._objects_input_type not in ('detection3d', 'tracked_objects'):
+                raise ValueError(
+                    'tracked_objects.input_type must be detection3d or tracked_objects'
+                )
             self._tf_timeout = self._param('tracked_objects', 'tf_timeout_sec', 0.2)
             if not 0 <= self._tf_timeout < float('inf'):
                 raise ValueError('tf_timeout_sec must be finite and non-negative')
-            self._tf_buffer = Buffer(cache_time=Duration(seconds=2.0))
-            self._tf_listener = TransformListener(self._tf_buffer, self)
             self._objects_pub = self.create_publisher(
                 TrackedObjectArray,
                 self._param('tracked_objects', 'output_topic', '/tracked_objects'),
                 reliable,
             )
-            self.create_subscription(
-                Detection3DArray,
-                self._param('tracked_objects', 'input_topic', '/segmentation/boxes_3d'),
-                self._on_detections,
-                sensor,
+            objects_input_topic = self._param(
+                'tracked_objects', 'input_topic', '/segmentation/boxes_3d'
             )
-            self._retry_clock = Clock(clock_type=ClockType.STEADY_TIME)
-            self._retry_timer = self.create_timer(
-                0.01, self._retry_detections, clock=self._retry_clock
-            )
+            if self._objects_input_type == 'detection3d':
+                self._tf_buffer = Buffer(cache_time=Duration(seconds=2.0))
+                self._tf_listener = TransformListener(self._tf_buffer, self)
+                self.create_subscription(
+                    Detection3DArray,
+                    objects_input_topic,
+                    self._on_detections,
+                    sensor,
+                )
+                self._retry_clock = Clock(clock_type=ClockType.STEADY_TIME)
+                self._retry_timer = self.create_timer(
+                    0.01, self._retry_detections, clock=self._retry_clock
+                )
+            else:
+                self.create_subscription(
+                    TrackedObjectArray,
+                    objects_input_topic,
+                    self._on_tracked_objects,
+                    sensor,
+                )
         if 'rover_state' in roles:
             self._state_converter = StateConverter(
                 frame=self._frame,
@@ -243,6 +262,13 @@ class PredictionBridgeNode(Node):
     def _on_detections(self, message):
         self._convert_detections(message, time.monotonic() + self._tf_timeout)
 
+    def _on_tracked_objects(self, message):
+        try:
+            _validate_tracked_objects(message, self._frame)
+            self._objects_pub.publish(message)
+        except ValueError as error:
+            self._warn(error)
+
     def _retry_detections(self):
         pending = list(self._pending_detections)
         self._pending_detections.clear()
@@ -276,6 +302,96 @@ class PredictionBridgeNode(Node):
                 self._warn(error)
         except ValueError as error:
             self._warn(error)
+
+
+def _validate_tracked_objects(message, expected_frame):
+    """Reject malformed canonical batches before they reach Prediction."""
+    require_frame(message.header, expected_frame)
+    track_ids = set()
+    for tracked_object in message.objects:
+        if tracked_object.track_id in track_ids:
+            raise ValueError(f'duplicate track ID {tracked_object.track_id}')
+        track_ids.add(tracked_object.track_id)
+        polygon = [
+            (float(point.x), float(point.y))
+            for point in tracked_object.footprint_polygon_xy
+        ]
+        if len(polygon) < 3 or len(set(polygon)) < 3:
+            raise ValueError(f'track {tracked_object.track_id} has an invalid footprint')
+        if not all(math.isfinite(value) for point in polygon for value in point):
+            raise ValueError(f'track {tracked_object.track_id} has non-finite footprint data')
+        area_twice = sum(
+            first[0] * second[1] - first[1] * second[0]
+            for first, second in zip(polygon, polygon[1:] + polygon[:1])
+        )
+        if abs(area_twice) <= 1e-9:
+            raise ValueError(f'track {tracked_object.track_id} has a degenerate footprint')
+        if not _polygon_is_simple(polygon):
+            raise ValueError(f'track {tracked_object.track_id} footprint self-intersects')
+        if tracked_object.confidence_valid and not math.isfinite(
+            tracked_object.confidence
+        ):
+            raise ValueError(f'track {tracked_object.track_id} has invalid confidence')
+        velocity = tracked_object.velocity
+        if tracked_object.velocity_valid and not all(
+            math.isfinite(value) for value in (velocity.x, velocity.y, velocity.z)
+        ):
+            raise ValueError(f'track {tracked_object.track_id} has invalid velocity')
+
+
+def _polygon_is_simple(polygon):
+    """Return whether a polygon has no intersecting non-adjacent edges."""
+    count = len(polygon)
+    for first in range(count):
+        first_end = (first + 1) % count
+        for second in range(first + 1, count):
+            second_end = (second + 1) % count
+            if first_end == second or second_end == first:
+                continue
+            if _segments_intersect(
+                polygon[first],
+                polygon[first_end],
+                polygon[second],
+                polygon[second_end],
+            ):
+                return False
+    return True
+
+
+def _segments_intersect(first, first_end, second, second_end):
+    """Test closed 2D segments, including collinear contact."""
+    def orientation(origin, end, point):
+        return (end[0] - origin[0]) * (point[1] - origin[1]) - (
+            end[1] - origin[1]
+        ) * (point[0] - origin[0])
+
+    values = (
+        orientation(first, first_end, second),
+        orientation(first, first_end, second_end),
+        orientation(second, second_end, first),
+        orientation(second, second_end, first_end),
+    )
+    epsilon = 1e-10
+    if values[0] * values[1] < -epsilon and values[2] * values[3] < -epsilon:
+        return True
+
+    def on_segment(origin, end, point):
+        return (
+            min(origin[0], end[0]) - epsilon <= point[0]
+            <= max(origin[0], end[0]) + epsilon
+            and min(origin[1], end[1]) - epsilon <= point[1]
+            <= max(origin[1], end[1]) + epsilon
+        )
+
+    return any(
+        abs(value) <= epsilon and on_segment(origin, end, point)
+        for value, origin, end, point in (
+            (values[0], first, first_end, second),
+            (values[1], first, first_end, second_end),
+            (values[2], second, second_end, first),
+            (values[3], second, second_end, first_end),
+        )
+    )
 
 
 def run(role=None, argv=None):

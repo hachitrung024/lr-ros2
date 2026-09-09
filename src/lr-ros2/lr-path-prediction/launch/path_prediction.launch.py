@@ -46,6 +46,11 @@ def generate_launch_description():
             DeclareLaunchArgument("path_topic", default_value="/lr/future_path/ground_truth"),
             DeclareLaunchArgument("terrain_topic", default_value="/terrain_geometry/grid_map"),
             DeclareLaunchArgument("objects_topic", default_value="/segmentation/boxes_3d"),
+            DeclareLaunchArgument(
+                "objects_input_type",
+                default_value="detection3d",
+                choices=["detection3d", "tracked_objects"],
+            ),
             DeclareLaunchArgument("pose_topic", default_value="/lr/mavlink/pose"),
             DeclareLaunchArgument("map_frame", default_value="map"),
             DeclareLaunchArgument("use_sim_time", default_value="false"),
@@ -59,6 +64,9 @@ def generate_launch_description():
                         "trajectory.input_topic": LaunchConfiguration("path_topic"),
                         "geometry.grid_map_topic": LaunchConfiguration("terrain_topic"),
                         "tracked_objects.input_topic": LaunchConfiguration("objects_topic"),
+                        "tracked_objects.input_type": LaunchConfiguration(
+                            "objects_input_type"
+                        ),
                         "rover_state.pose_topic": LaunchConfiguration("pose_topic"),
                         "prediction_profile": profile,
                         "expected_frame_id": map_frame,

@@ -8,6 +8,7 @@ from builtin_interfaces.msg import Time
 from rclpy.executors import SingleThreadedExecutor
 from rclpy.parameter import Parameter
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+from safety_perception_msgs.msg import TrackedObjectArray
 from sensor_msgs.msg import CameraInfo, Image
 from std_msgs.msg import Header
 from visualization_msgs.msg import Marker, MarkerArray
@@ -17,8 +18,11 @@ from lr_segmentation.box_estimator_3d import (
     BoxEstimator3DNode,
     BoxMeasurement,
     BoxTracker,
+    _polygon_is_simple,
+    _triangulate_polygon_xy,
     depth_message_to_meters,
     fit_oriented_box,
+    fit_projected_footprint,
     instance_mask_message_to_labels,
 )
 from lr_segmentation.conversions import labels_to_image_message
@@ -57,11 +61,14 @@ def depth_message(values, header):
     return message
 
 
-def measurement(center):
+def measurement(center, footprint_xy=None):
     return BoxMeasurement(
         center=np.asarray(center, dtype=np.float64),
         size=np.asarray([1.0, 0.8, 0.6], dtype=np.float64),
         orientation=np.asarray([0.0, 0.0, 0.0, 1.0], dtype=np.float64),
+        footprint_xy=(
+            None if footprint_xy is None else np.asarray(footprint_xy, dtype=np.float64)
+        ),
     )
 
 
@@ -83,6 +90,50 @@ def test_fit_oriented_box_recovers_size_with_a_vertical_constraint():
     assert box.size == pytest.approx([4.0, 2.0, 1.0])
 
 
+def test_projected_footprint_preserves_concavity_and_drops_detached_noise():
+    vertical_x, vertical_y = np.meshgrid(
+        np.linspace(0.0, 0.4, 9),
+        np.linspace(0.0, 2.0, 41),
+    )
+    horizontal_x, horizontal_y = np.meshgrid(
+        np.linspace(0.0, 2.0, 41),
+        np.linspace(0.0, 0.4, 9),
+    )
+    points = np.column_stack(
+        (
+            np.r_[vertical_x.ravel(), horizontal_x.ravel(), 10.0],
+            np.r_[vertical_y.ravel(), horizontal_y.ravel(), 10.0],
+        )
+    )
+
+    footprint = fit_projected_footprint(
+        points,
+        voxel_size_m=0.05,
+        simplify_tolerance_m=0.05,
+        minimum_area_m2=0.01,
+        maximum_vertices=16,
+        closing_radius_m=0.06,
+        minimum_thickness_m=0.04,
+    )
+
+    assert 6 <= footprint.shape[0] <= 16
+    assert np.max(footprint) < 3.0
+    area_twice = sum(
+        first[0] * second[1] - first[1] * second[0]
+        for first, second in zip(footprint, np.roll(footprint, -1, axis=0))
+    )
+    assert area_twice > 0.0
+    edges = np.roll(footprint, -1, axis=0) - footprint
+    following_edges = np.roll(edges, -1, axis=0)
+    turns = edges[:, 0] * following_edges[:, 1] - edges[:, 1] * following_edges[:, 0]
+    assert np.any(turns < -1e-6)
+    assert _polygon_is_simple(footprint)
+    assert len(_triangulate_polygon_xy(footprint)) == footprint.shape[0] - 2
+    assert not _polygon_is_simple(
+        np.asarray([[0.0, 0.0], [2.0, 2.0], [0.0, 2.0], [2.0, 0.0]])
+    )
+
+
 def test_tracker_preserves_the_id_and_filters_position_noise():
     tracker = BoxTracker(
         association_distance_m=1.0,
@@ -99,6 +150,26 @@ def test_tracker_preserves_the_id_and_filters_position_noise():
 
     assert first[0].track_id == second[0].track_id
     assert 0.0 < second[0].center[0] < 0.2
+
+
+def test_tracker_moves_latest_footprint_with_the_filtered_center():
+    tracker = BoxTracker(
+        association_distance_m=1.0,
+        max_missed_frames=2,
+        min_confirmations=1,
+        measurement_stddev_m=0.08,
+        acceleration_stddev_mps2=1.0,
+        size_smoothing=0.5,
+        orientation_smoothing=0.5,
+    )
+    polygon = [[-0.5, -0.5], [0.5, -0.5], [0.5, 0.5], [-0.5, 0.5]]
+
+    first = tracker.update([measurement([0.0, 0.0, 2.0], polygon)], 1.0)[0]
+    moved = np.asarray(polygon) + [0.2, 0.0]
+    second = tracker.update([measurement([0.2, 0.0, 2.0], moved)], 1.1)[0]
+
+    assert np.allclose(first.footprint_xy, polygon)
+    assert np.mean(second.footprint_xy, axis=0) == pytest.approx(second.center[:2])
 
 
 def test_tracker_reset_starts_a_new_svo_timeline():
@@ -136,6 +207,10 @@ def test_box_node_publishes_standard_detection3d_array(ros_context):
             Parameter("input.depth_topic", value="/box_test/depth"),
             Parameter("input.camera_info_topic", value="/box_test/camera_info"),
             Parameter("output.box_topic", value="/box_test/boxes_3d"),
+            Parameter(
+                "output.footprint_topic",
+                value="/box_test/tracked_footprints",
+            ),
             Parameter("output.marker_topic", value="/box_test/box_markers"),
             Parameter("sampling_stride", value=1),
             Parameter("minimum_points_per_instance", value=3),
@@ -173,6 +248,13 @@ def test_box_node_publishes_standard_detection3d_array(ros_context):
         markers.append,
         sensor_qos,
     )
+    footprints = []
+    driver.create_subscription(
+        TrackedObjectArray,
+        "/box_test/tracked_footprints",
+        footprints.append,
+        sensor_qos,
+    )
 
     try:
         assert spin_until(
@@ -195,7 +277,10 @@ def test_box_node_publishes_standard_detection3d_array(ros_context):
             depth_message(np.full(labels.shape, 2.0, np.float32), header)
         )
 
-        assert spin_until(executor, lambda: bool(detections) and bool(markers))
+        assert spin_until(
+            executor,
+            lambda: bool(detections) and bool(footprints) and bool(markers),
+        )
         output = detections[-1]
         assert output.header.frame_id == "camera_optical"
         assert len(output.detections) == 1
@@ -207,16 +292,25 @@ def test_box_node_publishes_standard_detection3d_array(ros_context):
         assert detection.bbox.size.z > 0.0
         assert [marker.type for marker in markers[-1].markers] == [
             Marker.ARROW,
-            Marker.CUBE,
+            Marker.TRIANGLE_LIST,
             Marker.LINE_LIST,
             Marker.TEXT_VIEW_FACING,
         ]
         assert markers[-1].markers[0].action == Marker.DELETEALL
-        frame = markers[-1].markers[2]
-        assert frame.ns == "segmentation_box_frames"
-        assert frame.scale.x == pytest.approx(0.07)
-        assert frame.color.a == pytest.approx(1.0)
-        assert len(frame.points) == 24
+        footprint_output = footprints[-1]
+        assert footprint_output.header.frame_id == "camera_optical"
+        assert len(footprint_output.objects) == 1
+        tracked_object = footprint_output.objects[0]
+        assert tracked_object.track_id == 1
+        assert len(tracked_object.footprint_polygon_xy) == 4
+        prism = markers[-1].markers[1]
+        assert prism.ns == "segmentation_footprint_prisms"
+        assert prism.color.a == pytest.approx(0.18)
+        assert len(prism.points) == 36
+        assert {round(point.z, 3) for point in prism.points} == {1.98, 2.08}
+        prism_edges = markers[-1].markers[2]
+        assert prism_edges.ns == "segmentation_footprint_prism_edges"
+        assert len(prism_edges.points) == 24
     finally:
         executor.remove_node(node)
         executor.remove_node(driver)

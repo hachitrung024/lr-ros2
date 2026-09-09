@@ -144,11 +144,13 @@ Visualization Manager:
       Name: Video
     - Class: rviz_default_plugins/MarkerArray
       Enabled: true
-      Name: Segmentation 3D Boxes
+      Name: Segmentation 3D Footprints
       Namespaces:
-        segmentation_box_fills: true
-        segmentation_box_frames: true
+        segmentation_box_fills: false
+        segmentation_box_frames: false
         segmentation_box_ids: true
+        segmentation_footprint_prism_edges: true
+        segmentation_footprint_prisms: true
       Topic:
         Depth: 1
         Durability Policy: Volatile
