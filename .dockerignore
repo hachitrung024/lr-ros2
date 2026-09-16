@@ -2,5 +2,7 @@
 build
 install
 log
+models
+mavlink
 src/zed-ros2-wrapper/docker/tmp_sources
 src/zed-ros2-wrapper/docker/tmp_sdk
