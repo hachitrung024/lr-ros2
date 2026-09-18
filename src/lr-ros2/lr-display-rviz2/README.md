@@ -37,6 +37,14 @@ Use the following launch command to start the ZED ROS2 Wrapper node and RVIZ2 wi
 $ ros2 launch lr_display_rviz2 display_zed_cam.launch.py camera_model:=<camera_model>
 ```
 
+To deploy the processing pipeline without a local GUI, use
+`headless_zed_cam.launch.py` with the same backend arguments. Run the UI on the
+debug machine with `rviz_zed_cam.launch.py`; for SVO playback pass
+`use_sim_time:=true svo_mode:=true`. Both processes can be tested on one host
+and use ROS 2 DDS unchanged when moved to two hosts on the same LAN. The full
+commands and network checklist are in the workspace
+`docs/distributed-rviz.md` guide.
+
 Replace `<camera_model>` with the model of the camera that you are using: `'zed'`, `'zedm'`, `'zed2'`, `'zed2i'`, `'zedx'`, `'zedxm'`, `'virtual'`.
 
 To play an SVO file in real time and publish its clock, use:

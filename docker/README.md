@@ -165,6 +165,38 @@ ros2 launch lr_display_rviz2 display_zed_cam.launch.py \
   svo_path:=/data/svo/recording.svo2
 ```
 
+For a headless Jetson deployment, the container does not need `DISPLAY` or the
+X11 socket mount. Keep `--network host`, set the same ROS domain on the Jetson
+and laptop, and start the backend with:
+
+```bash
+export ROS_DOMAIN_ID=42
+export ROS_LOCALHOST_ONLY=0
+
+ros2 launch lr_display_rviz2 headless_zed_cam.launch.py \
+  camera_model:=zed2i \
+  publish_svo_clock:=true \
+  segmentation_model_path:=/workspace/lr-ros2/models/best.pt \
+  mavlink:=true \
+  mavlink_dir:=/data/mavlink \
+  future_path:=true \
+  svo_path:=/data/svo/recording.svo2
+```
+
+In the desktop container on the laptop, keep the display/X11 options and run
+only the UI with the same two environment variables:
+
+```bash
+ros2 launch lr_display_rviz2 rviz_zed_cam.launch.py \
+  camera_model:=zed2i \
+  use_sim_time:=true \
+  svo_mode:=true \
+  segmentation_enabled:=true
+```
+
+The full host-network discovery checklist is in
+[`docs/distributed-rviz.md`](../docs/distributed-rviz.md).
+
 After leaving the container, revoke the temporary X11 permission:
 
 ```bash

@@ -41,6 +41,63 @@ and samples above 5 m/s are excluded from the path. Override these with
 `future_path_radius_m`, `future_path_horizon_s`, `future_path_step_m`,
 `future_path_stationary_speed_mps`, and `future_path_max_speed_mps`.
 
+## Split headless pipeline and RViz UI
+
+The processing pipeline and RViz can run as separate ROS 2 processes. For a
+same-host test, open two terminals, source the same workspace in both, and use
+the same domain settings:
+
+```bash
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+export ROS_DOMAIN_ID=42
+export ROS_LOCALHOST_ONLY=0
+```
+
+Start the deploy pipeline in the first terminal. This entry point locks
+`start_rviz` to `false`, so it cannot create a GUI on the Jetson:
+
+```bash
+ros2 launch lr_display_rviz2 headless_zed_cam.launch.py \
+  camera_model:=zed2i \
+  publish_svo_clock:=true \
+  segmentation_model_path:=models/best.pt \
+  mavlink:=true \
+  future_path:=true \
+  svo_path:=/zed/svo/zed_20260710_092420_0001.svo2
+```
+
+Start only the debug UI in the second terminal:
+
+```bash
+ros2 launch lr_display_rviz2 rviz_zed_cam.launch.py \
+  camera_model:=zed2i \
+  use_sim_time:=true \
+  svo_mode:=true \
+  segmentation_enabled:=true
+```
+
+The UI host does not open the SVO or model file. It subscribes to the topics,
+TF and `/clock` from the headless host, and its SVO panel calls the remote ZED
+services. Use `segmentation_enabled:=false` to show the ZED RGB topic in the
+main video dock when segmentation is disabled.
+
+For two physical machines, run the first command on the Jetson and the second
+on the laptop. Both machines need compatible ROS 2 installations, the same
+`ROS_DOMAIN_ID`, `ROS_LOCALHOST_ONLY=0`, and this workspace built so the laptop
+has the custom message types and RViz plugins. DDS multicast and UDP traffic
+must be allowed on the LAN. Containers on either machine must use host
+networking. Verify discovery from the laptop before opening RViz:
+
+```bash
+ros2 node list
+ros2 topic list
+ros2 topic echo /clock --once
+```
+
+See [distributed RViz deployment](docs/distributed-rviz.md) for the full
+same-host and LAN checklist.
+
 ## Canonical prediction pipeline
 
 Prediction is built as normal ROS 2 packages under `src/lr-ros2`.

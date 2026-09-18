@@ -548,16 +548,27 @@ def launch_setup(context, *args, **kwargs):
     ]
 
 
-def generate_launch_description():
-    """Declare display pipeline launch arguments."""
+def generate_launch_description(
+    *, start_rviz_default='true', start_rviz_choices=('true', 'false')
+):
+    """
+    Declare display pipeline launch arguments.
+
+    The optional RViz declaration values let the dedicated headless entry
+    point reuse this launch without duplicating the perception pipeline.
+    """
     return LaunchDescription(
         [
-            DeclareLaunchArgument('start_rviz', default_value='true', choices=['true', 'false']),
+            DeclareLaunchArgument(
+                'start_rviz',
+                default_value=start_rviz_default,
+                choices=list(start_rviz_choices),
+            ),
             DeclareLaunchArgument(
                 'start_zed_node',
                 default_value='True',
                 description=(
-                    'Set to `False` to start only RVIZ2 if a ZED node is ' 'already running.'
+                    'Set to `False` when a compatible ZED node is already running.'
                 ),
             ),
             DeclareLaunchArgument(

@@ -81,6 +81,9 @@ if(BUILD_TESTING)
   ament_add_pytest_test(test_display_zed_cam_launch
     test/test_display_zed_cam_launch.py
   )
+  ament_add_pytest_test(test_distributed_launch
+    test/test_distributed_launch.py
+  )
 endif()
 
 ###############################################################################
