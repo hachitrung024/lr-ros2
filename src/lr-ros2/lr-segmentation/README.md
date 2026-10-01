@@ -57,3 +57,30 @@ box markers are hidden by default with `visualization.show_boxes: false`; the
 output frame is `map`; set
 `box_frame:=<camera_optical_frame>` and configure `geometry.up_axis` if no
 world-frame TF is available.
+
+Mask labels are mapped back to the original image after removing YOLO letterbox
+padding. Instance overlap is resolved at inference resolution before resizing
+the single label image. Depth validity and intrinsics are evaluated once per
+frame, then valid pixels are grouped by instance for projection.
+
+A nonempty mask whose instances all lack sufficient depth does not produce an
+empty objects observation. The same applies while every measured object is
+still awaiting tracker confirmation. A mask with no instances can produce a
+valid empty observation. If only some instances can be reconstructed, their
+confirmed boxes are retained and diagnostics report a partial observation;
+the resulting object list does not imply complete obstacle coverage.
+
+Timestamped TF lookup is nonblocking. A matched pair waits up to
+`tf_timeout_sec` (0.2 s by default), with one pending pair and bounded input
+buffers. Later pairs cannot overtake it. Expiry and clock rewind discard the
+pending pair without publishing synthetic free-space evidence.
+
+Both nodes report unavailable/stale output on `/diagnostics`.
+`diagnostics.stale_after_sec` defaults to 2 s and uses ROS time, so pausing an
+SVO does not age a successful observation. Box diagnostics also report
+`invalid_pairs`, `unobservable_instances`, and `tf_failures`.
+
+The implementation separates ROS orchestration (`box_estimator_3d`) from
+geometry (`box_geometry`), tracking (`box_tracking`), image decoding/projection
+(`depth_sampling`), and output rendering (`box_outputs`). Historical public
+box/fitting imports from `box_estimator_3d` remain available.

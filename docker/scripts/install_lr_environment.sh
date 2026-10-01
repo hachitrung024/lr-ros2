@@ -59,6 +59,7 @@ apt-get install -y --no-install-recommends \
   python3-shapely \
   python3-yaml \
   "ros-${ROS_DISTRO}-ament-cmake-auto" \
+  "ros-${ROS_DISTRO}-ament-cmake-gtest" \
   "ros-${ROS_DISTRO}-ament-cmake-clang-format" \
   "ros-${ROS_DISTRO}-ament-cmake-pytest" \
   "ros-${ROS_DISTRO}-ament-copyright" \

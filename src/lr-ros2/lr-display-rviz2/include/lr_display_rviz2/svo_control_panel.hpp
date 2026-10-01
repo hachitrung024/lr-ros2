@@ -16,6 +16,7 @@
 #define LR_DISPLAY_RVIZ2__SVO_CONTROL_PANEL_HPP_
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <rclcpp/rclcpp.hpp>
 #include <rviz_common/panel.hpp>
@@ -47,6 +48,7 @@ private Q_SLOTS:
   void seekToStart();
   void seekFromSlider();
   void refreshControls();
+  void requestTimedOut();
 
 private:
   void handleStatus(const zed_msgs::msg::SvoStatus::SharedPtr msg);
@@ -54,6 +56,8 @@ private:
   void seekToFrame(int frame);
   void setFeedback(const QString & text, bool error = false);
   void hideDockWhenLive();
+  uint64_t beginRequest();
+  void finishRequest(const QString & message, bool error);
 
   QLabel * mode_label_;
   QLabel * file_label_;
@@ -63,6 +67,7 @@ private:
   QPushButton * restart_button_;
   QPushButton * play_pause_button_;
   QTimer * refresh_timer_;
+  QTimer * request_timer_;
 
   rclcpp::Node::SharedPtr node_;
   rclcpp::Subscription<zed_msgs::msg::SvoStatus>::SharedPtr status_subscription_;
@@ -73,6 +78,10 @@ private:
   bool received_status_ = false;
   bool real_time_mode_ = false;
   bool request_pending_ = false;
+  uint64_t request_generation_ = 0;
+  std::function<void()> cancel_pending_request_;
+
+  friend class SvoControlPanelTest;
 };
 
 }  // namespace lr_display_rviz2

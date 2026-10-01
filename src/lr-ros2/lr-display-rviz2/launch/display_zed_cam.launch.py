@@ -353,67 +353,42 @@ def launch_setup(context, *args, **kwargs):
         nodes.insert(0, segmentation_warning)
 
     if camera_type == 'stereo':
-        terrain_node = Node(
-            package='lr_terrain_geometry',
-            executable='terrain_geometry_node',
-            name='terrain_geometry',
-            output='screen',
-            parameters=[
-                terrain_params_file,
-                {
-                    'input.point_cloud_topic': (
-                        f'/{camera_name_val}/zed_node/' 'point_cloud/cloud_registered'
-                    ),
-                    'frames.map_frame': map_frame,
+        nodes.append(
+            IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(
+                    os.path.join(
+                        get_package_share_directory('lr_terrain_geometry'),
+                        'launch', 'terrain_geometry.launch.py',
+                    )
+                ),
+                launch_arguments={
+                    'camera_name': camera_name_val,
+                    'terrain_params_file': terrain_params_file,
+                    'map_frame': map_frame,
                     'use_sim_time': publish_svo_clock,
-                },
-            ],
-            condition=IfCondition(start_terrain_node),
+                }.items(),
+                condition=IfCondition(start_terrain_node),
+            )
         )
-        nodes.append(terrain_node)
-
-        segmentation_node = Node(
-            package='lr_segmentation',
-            executable='segmentation_node',
-            name='segmentation',
-            output='screen',
-            parameters=[
-                segmentation_params_file,
-                {
-                    'input.image_topic': (f'/{camera_name_val}/zed_node/' 'rgb/color/rect/image'),
-                    'model.path': segmentation_model_path,
+        nodes.append(
+            IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(
+                    os.path.join(
+                        get_package_share_directory('lr_segmentation'),
+                        'launch', 'segmentation.launch.py',
+                    )
+                ),
+                launch_arguments={
+                    'camera_name': camera_name_val,
+                    'segmentation_params_file': segmentation_params_file,
+                    'model_path': segmentation_model_path,
+                    'box_frame': map_frame,
+                    'box_up_axis': '[0.0, 0.0, 1.0]',
                     'use_sim_time': publish_svo_clock,
-                },
-            ],
-            condition=IfCondition(TextSubstitution(text=start_segmentation_val)),
+                }.items(),
+                condition=IfCondition(TextSubstitution(text=start_segmentation_val)),
+            )
         )
-        nodes.append(segmentation_node)
-
-        box_estimator_node = Node(
-            package='lr_segmentation',
-            executable='box_estimator_3d_node',
-            name='box_estimator_3d',
-            output='screen',
-            parameters=[
-                segmentation_params_file,
-                {
-                    'input.mask_topic': '/segmentation/instance_mask',
-                    'input.depth_topic': (
-                        f'/{camera_name_val}/zed_node/' 'depth/depth_registered'
-                    ),
-                    'input.camera_info_topic': (
-                        f'/{camera_name_val}/zed_node/' 'rgb/color/rect/camera_info'
-                    ),
-                    'output.box_topic': '/segmentation/boxes_3d',
-                    'output.footprint_topic': '/segmentation/tracked_footprints',
-                    'output.frame_id': map_frame,
-                    'geometry.up_axis': [0.0, 0.0, 1.0],
-                    'use_sim_time': publish_svo_clock,
-                },
-            ],
-            condition=IfCondition(TextSubstitution(text=start_segmentation_val)),
-        )
-        nodes.append(box_estimator_node)
 
         nodes.append(
             IncludeLaunchDescription(

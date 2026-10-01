@@ -36,3 +36,9 @@ Clock rewinds clear histories and the core runtime; the ROS-independent
 `PredictionRuntime.reset()` API also exposes that operation. The existing
 `on_objects` API now accepts optional batch `timestamp`, required by age
 validation for empty batches. The core physics algorithms are unchanged.
+
+Typed conversions live in `adapters.py`. The legacy JSON development contract
+is isolated in `legacy_json.py`; `prediction_ros.adapters.JsonAdapters` remains
+a compatibility import. The `cache`, `coordinator`, and `validation` modules
+also remain compatibility re-exports of `prediction_core`. New runtime code
+should use the typed adapters and import core orchestration directly.

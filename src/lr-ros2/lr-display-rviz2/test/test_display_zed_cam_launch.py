@@ -246,3 +246,29 @@ def test_shared_prediction_launch_has_three_processes():
         'prediction_node',
         'canonical_prediction_visualizer_node',
     ]
+
+
+def test_perception_uses_shared_launches_with_display_overrides():
+    """Pass the camera, simulation clock, YAML and world up-axis to shared launches."""
+    context = _context(
+        camera_name='rover', start_terrain_node='true', start_segmentation_node='auto',
+        segmentation_model_path='/tmp/best.pt', map_frame='world',
+    )
+    actions = _load_launch_module().launch_setup(context)
+    includes = [a for a in actions if isinstance(a, IncludeLaunchDescription)]
+    terrain = next(a for a in includes if 'terrain_params_file' in dict(a.launch_arguments))
+    segmentation = next(a for a in includes if 'model_path' in dict(a.launch_arguments))
+    assert terrain.condition.evaluate(context)
+    assert segmentation.condition.evaluate(context)
+    for include in (terrain, segmentation):
+        arguments = dict(include.launch_arguments)
+        assert arguments['camera_name'] == 'rover'
+        assert _substitution_text(context, arguments['use_sim_time']) == 'true'
+    arguments = dict(segmentation.launch_arguments)
+    assert _substitution_text(context, arguments['box_frame']) == 'world'
+    assert arguments['box_up_axis'] == '[0.0, 0.0, 1.0]'
+    assert _substitution_text(context, arguments['model_path']) == '/tmp/best.pt'
+    assert (
+        _substitution_text(context, arguments['segmentation_params_file'])
+        == '/tmp/segmentation.yaml'
+    )

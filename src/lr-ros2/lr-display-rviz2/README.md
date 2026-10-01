@@ -4,6 +4,12 @@ This package lets you visualize in the [ROS 2 RViz application](https://github.c
 possible information that can be acquired using a Stereolabs camera.
 The package provides the launch files for ZED, ZED Mini and ZED 2 camera models.
 
+The display pipeline includes the segmentation and terrain packages' shared
+launch files. Explicit display camera/frame/time parameters override their
+YAML files. The SVO panel times out unanswered pause/seek requests after
+3 seconds, cleans up the pending ROS request, and allows a retry. Pausing
+realtime SVO playback still requires the wrapper's realtime-pause patch.
+
 **Note:** The main package [zed-ros2-wrapper](https://github.com/stereolabs/zed-ros2-wrapper)
 is required to correctly execute the ROS node to acquire data from a Stereolabs 3D camera.
 

@@ -10,8 +10,8 @@ ARG TORCH_SPEC="torch>=2.1,<3"
 ARG TORCHVISION_SPEC="torchvision"
 
 USER root
-COPY requirements-lr.txt /tmp/requirements-lr.txt
-COPY scripts/install_lr_environment.sh /tmp/install_lr_environment.sh
+COPY src/lr-ros2/lr-segmentation/requirements.txt /tmp/requirements-lr.txt
+COPY docker/scripts/install_lr_environment.sh /tmp/install_lr_environment.sh
 
 RUN chmod 755 /tmp/install_lr_environment.sh && \
     /tmp/install_lr_environment.sh \

@@ -1,5 +1,7 @@
 """Launch segmentation against an already-running ZED wrapper."""
 
+import json
+import math
 import os
 
 from ament_index_python.packages import get_package_share_directory
@@ -25,6 +27,24 @@ def launch_setup(context, *args, **kwargs):
         camera_info_topic = (
             f"/{camera_name}/zed_node/rgb/color/rect/camera_info"
         )
+    box_parameters = {
+        "input.mask_topic": "/segmentation/instance_mask",
+        "input.depth_topic": depth_topic,
+        "input.camera_info_topic": camera_info_topic,
+        "output.box_topic": LaunchConfiguration("box_topic"),
+        "output.frame_id": LaunchConfiguration("box_frame"),
+        "use_sim_time": LaunchConfiguration("use_sim_time"),
+    }
+    up_axis = LaunchConfiguration("box_up_axis").perform(context).strip()
+    if up_axis:
+        values = json.loads(up_axis)
+        if (
+            not isinstance(values, list) or len(values) != 3
+            or not all(isinstance(v, (int, float)) and math.isfinite(v) for v in values)
+            or sum(v * v for v in values) <= 1e-12
+        ):
+            raise ValueError("box_up_axis must contain three finite values with nonzero norm")
+        box_parameters["geometry.up_axis"] = [float(v) for v in values]
     return [
         Node(
             package="lr_segmentation",
@@ -47,14 +67,7 @@ def launch_setup(context, *args, **kwargs):
             output="screen",
             parameters=[
                 LaunchConfiguration("segmentation_params_file"),
-                {
-                    "input.mask_topic": "/segmentation/instance_mask",
-                    "input.depth_topic": depth_topic,
-                    "input.camera_info_topic": camera_info_topic,
-                    "output.box_topic": LaunchConfiguration("box_topic"),
-                    "output.frame_id": LaunchConfiguration("box_frame"),
-                    "use_sim_time": LaunchConfiguration("use_sim_time"),
-                },
+                box_parameters,
             ],
             condition=IfCondition(
                 LaunchConfiguration("start_box_estimator_3d")
@@ -77,6 +90,7 @@ def generate_launch_description():
             DeclareLaunchArgument("depth_topic", default_value=""),
             DeclareLaunchArgument("camera_info_topic", default_value=""),
             DeclareLaunchArgument("model_path"),
+            DeclareLaunchArgument("box_up_axis", default_value=""),
             DeclareLaunchArgument("use_sim_time", default_value="false"),
             DeclareLaunchArgument(
                 "start_box_estimator_3d",

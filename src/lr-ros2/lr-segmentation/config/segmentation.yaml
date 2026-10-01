@@ -6,6 +6,7 @@ segmentation:
     model.confidence: 0.25
     model.image_size: 960
     model.iou: 0.60
+    diagnostics.stale_after_sec: 2.0
 
 box_estimator_3d:
   ros__parameters:
@@ -18,6 +19,8 @@ box_estimator_3d:
     output.frame_id: map
     geometry.up_axis: [0.0, 0.0, 1.0]
     sync_tolerance_sec: 0.05
+    tf_timeout_sec: 0.2
+    diagnostics.stale_after_sec: 2.0
     sync_buffer.max_samples: 30
     sync_buffer.max_age_sec: 1.0
     minimum_depth_m: 0.2

@@ -1,123 +1,19 @@
+"""Accumulate and maintain rolling terrain cells with temporal plane acceptance."""
+
 from __future__ import annotations
 
 import math
 import logging
-from collections import deque
-from dataclasses import dataclass, field
 from typing import Optional
 
 import numpy as np
 
+from .plane_fitting import PlaneFitter
+from .terrain_types import (
+    EffectiveCellThresholds, LocalTerrainCell, PointBatch, TerrainGeometryConfig, TerrainResult,
+)
+
 LOGGER = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class TerrainGeometryConfig:
-    # Map lifetime and reset policy.
-    enabled: bool = True
-    radius_m: float = 12.0
-    cell_size_m: float = 1.0
-    ttl_seconds: float = 60.0
-    retention_hysteresis_m: float = 1.0
-    pose_jump_threshold_m: float = 3.0
-    pose_jump_rotation_deg: float = 45.0
-
-    # Input point filtering in the camera-local processing volume.
-    min_distance: float = 0.35
-    max_distance: float = 15.0
-    min_forward_m: Optional[float] = 1.0
-    max_forward_m: Optional[float] = 10.0
-    min_lateral_m: Optional[float] = -3.0
-    max_lateral_m: Optional[float] = 3.0
-    min_height_m: float = -10.0
-    max_height_m: float = 10.0
-    # Point accumulation and fit workload limits.
-    max_ingest_points_per_frame: int = 12000
-    max_points_per_cell_per_frame: int = 200
-    max_points_per_cell: int = 1500
-    point_window_seconds: float = 10.0
-    voxel_size_m: float = 0.05
-    fit_every_frames: int = 5
-    max_cells_fit_per_cycle: int = 100
-    max_central_fit_points: int = 1200
-    max_neighbor_fit_points: int = 300
-    neighbor_halo_m: float = 0.10
-    ransac_iterations: int = 160
-    robust_refinement_iterations: int = 3
-
-    # ------------------------------------------------------------------
-    # PLANE ACCEPTANCE - main tuning block.
-    # A cell is fitted only after both accumulation requirements are met.
-    min_accumulation_frames: int = 3
-    min_cell_points: int = 80
-    # Point-to-plane inlier distance. Increase for noisier depth data.
-    distance_threshold: float = 0.035
-    # A plane must satisfy BOTH the absolute and relative inlier limits.
-    min_cell_inliers: int = 10
-    min_cell_inlier_ratio: float = 0.15
-    # Minor principal spread of central inliers in world X/Z.
-    min_cell_principal_stddev: float = 0.10
-    # RMSE is calculated from central inliers only.
-    max_cell_rmse: float = 0.035
-    max_plane_slope_deg: float = 55.0
-    # Scale point/inlier thresholds by cell area and coverage by cell length.
-    auto_scale_cell_thresholds: bool = True
-    cell_reference_size_m: float = 1.0
-
-    # TEMPORAL ACCEPTANCE - confirmation, rejection and surface switching.
-    confirmation_good_fits: int = 2
-    rejection_bad_fits: int = 2
-    plane_consistency_normal_deg: float = 5.0
-    plane_consistency_height_m: float = 0.10
-    plane_ema_alpha: float = 0.25
-    random_seed: int = 7
-    print_status: bool = False
-
-
-@dataclass(frozen=True)
-class EffectiveCellThresholds:
-    min_points: int
-    min_inliers: int
-    min_principal_stddev: float
-    max_cells_fit: int
-
-
-@dataclass
-class PointBatch:
-    timestamp: float
-    frame_index: int
-    points_world: np.ndarray
-
-
-@dataclass
-class LocalTerrainCell:
-    key: tuple[int, int]
-    first_seen: float
-    last_point_seen: float
-    batches: deque[PointBatch] = field(default_factory=deque)
-    point_count: int = 0
-    observation_count: int = 0
-    last_fit_frame: Optional[int] = None
-    last_fit_timestamp: Optional[float] = None
-    last_successful_fit: Optional[float] = None
-    plane: Optional[dict] = None
-    candidate_plane: Optional[dict] = None
-    candidate_good_fits: int = 0
-    consecutive_bad_fits: int = 0
-    rejected_plane: Optional[dict] = None
-    rejection_reason: Optional[str] = None
-
-
-@dataclass(frozen=True)
-class TerrainResult:
-    accepted_planes: tuple[dict, ...]
-    rejected_planes: tuple[dict, ...]
-    debug_cells: tuple[dict, ...]
-    fit_cycle: bool
-    display_changed: bool
-    reset_reason: Optional[str]
-    cell_count: int
-    point_count: int
 
 
 class TerrainGeometryEstimator:
@@ -131,7 +27,7 @@ class TerrainGeometryEstimator:
             config if config is not None else TerrainGeometryConfig()
         )
         self._validate_config()
-        self._rng = np.random.default_rng(self.config.random_seed)
+        self._fitter = PlaneFitter(self.config)
         self._cells: dict[tuple[int, int], LocalTerrainCell] = {}
         self._last_pose_matrix: Optional[np.ndarray] = None
         self._last_timestamp: Optional[float] = None
@@ -183,7 +79,7 @@ class TerrainGeometryEstimator:
         self._last_pose_matrix = None
         self._last_timestamp = None
         self._frame_index = 0
-        self._rng = np.random.default_rng(self.config.random_seed)
+        self._fitter.reset()
 
     def update(
         self,
@@ -306,7 +202,7 @@ class TerrainGeometryEstimator:
                     if cell.rejection_reason is not None
                     else "unchecked"
                 ),
-                "footprint_world": self._horizontal_footprint(
+                "footprint_world": self._fitter.horizontal_footprint(
                     cell.key,
                     float(np.median(points[:, 2])),
                 ),
@@ -622,8 +518,13 @@ class TerrainGeometryEstimator:
             return_inverse=True,
         )
 
+        # A stable sort preserves per-cell point order and therefore the same
+        # deterministic point-cap sampling, without rescanning every point per cell.
+        order = np.argsort(inverse, kind="stable")
+        grouped_points = points_world[order]
+        boundaries = np.r_[0, np.cumsum(np.bincount(inverse))]
         for cell_index, coordinates in enumerate(unique_cells):
-            cell_points = points_world[inverse == cell_index]
+            cell_points = grouped_points[boundaries[cell_index]:boundaries[cell_index + 1]]
             if (
                 cell_points.shape[0]
                 > self.config.max_points_per_cell_per_frame
@@ -711,7 +612,7 @@ class TerrainGeometryEstimator:
             ):
                 continue
             distance = float(np.linalg.norm(
-                np.asarray(self._grid_center_xy(cell.key))
+                np.asarray(self._fitter.grid_center_xy(cell.key))
                 - rover_position[[0, 1]]
             ))
             priority = (
@@ -725,7 +626,7 @@ class TerrainGeometryEstimator:
         eligible.sort(key=lambda item: item[0])
         for _, cell in eligible[:thresholds.max_cells_fit]:
             central_points, fit_points = self._fit_points_for_cell(cell)
-            result = self._fit_plane_world(
+            result = self._fitter.fit(
                 fit_points,
                 central_points,
                 cell,
@@ -976,8 +877,8 @@ class TerrainGeometryEstimator:
         blended["center_world"] = center.astype(np.float32)
         blended["grid_center_world"] = center.astype(np.float32)
         blended["normal_world"] = normal.astype(np.float32)
-        blended["slope_deg"] = self._slope_from_world_normal(normal)
-        blended["footprint_world"] = self._plane_footprint(
+        blended["slope_deg"] = self._fitter.slope_from_world_normal(normal)
+        blended["footprint_world"] = self._fitter.plane_footprint(
             key,
             center,
             normal,
@@ -985,230 +886,6 @@ class TerrainGeometryEstimator:
         blended["rejection_reason"] = None
         blended["show_label"] = False
         return blended
-
-    def _fit_plane_world(
-        self,
-        fit_points_world: np.ndarray,
-        central_points_world: np.ndarray,
-        cell: LocalTerrainCell,
-        thresholds: EffectiveCellThresholds,
-    ) -> Optional[dict]:
-        sample = np.asarray(fit_points_world, dtype=np.float64)
-        central_sample = np.asarray(
-            central_points_world,
-            dtype=np.float64,
-        )
-        sample_count = int(central_sample.shape[0])
-        if sample.shape[0] < 3 or sample_count < 3:
-            return None
-
-        prior_plane = cell.plane or cell.candidate_plane
-        prior_normal = None
-        if prior_plane is not None:
-            prior_normal = np.asarray(
-                prior_plane["normal_world"],
-                dtype=np.float64,
-            )
-            prior_normal /= max(float(np.linalg.norm(prior_normal)), 1e-9)
-
-        iteration_count = self.config.ransac_iterations
-        point_count = sample.shape[0]
-        hypothesis_indices = self._rng.integers(
-            0,
-            point_count,
-            size=(iteration_count, 3),
-        )
-        duplicate_rows = (
-            (hypothesis_indices[:, 0] == hypothesis_indices[:, 1])
-            | (hypothesis_indices[:, 0] == hypothesis_indices[:, 2])
-            | (hypothesis_indices[:, 1] == hypothesis_indices[:, 2])
-        )
-        while np.any(duplicate_rows):
-            hypothesis_indices[duplicate_rows] = self._rng.integers(
-                0,
-                point_count,
-                size=(int(np.count_nonzero(duplicate_rows)), 3),
-            )
-            duplicate_rows = (
-                (hypothesis_indices[:, 0] == hypothesis_indices[:, 1])
-                | (hypothesis_indices[:, 0] == hypothesis_indices[:, 2])
-                | (hypothesis_indices[:, 1] == hypothesis_indices[:, 2])
-            )
-
-        p0 = sample[hypothesis_indices[:, 0]]
-        p1 = sample[hypothesis_indices[:, 1]]
-        p2 = sample[hypothesis_indices[:, 2]]
-        normals = np.cross(p1 - p0, p2 - p0)
-        normal_lengths = np.linalg.norm(normals, axis=1)
-        valid_hypotheses = normal_lengths >= 1e-6
-        normals[valid_hypotheses] /= normal_lengths[
-            valid_hypotheses,
-            None,
-        ]
-        normals[~valid_hypotheses] = 0.0
-        flip_mask = normals[:, 2] < 0.0
-        normals[flip_mask] *= -1.0
-        offsets = -np.einsum("ij,ij->i", normals, p0)
-
-        hypothesis_distances = np.abs(
-            central_sample @ normals.T + offsets[None, :]
-        )
-        hypothesis_inliers = (
-            hypothesis_distances < self.config.distance_threshold
-        )
-        hypothesis_counts = np.count_nonzero(
-            hypothesis_inliers,
-            axis=0,
-        )
-        squared_error = np.sum(
-            np.square(hypothesis_distances)
-            * hypothesis_inliers,
-            axis=0,
-        )
-        hypothesis_rmse = np.sqrt(
-            squared_error / np.maximum(hypothesis_counts, 1)
-        )
-        if prior_normal is None:
-            prior_deltas = np.zeros(iteration_count, dtype=np.float64)
-        else:
-            prior_deltas = np.arccos(np.clip(
-                normals @ prior_normal,
-                -1.0,
-                1.0,
-            ))
-        slopes = np.degrees(np.arccos(np.clip(
-            np.abs(normals[:, 2]),
-            -1.0,
-            1.0,
-        )))
-
-        def select_hypothesis(mask: np.ndarray) -> Optional[int]:
-            candidates = np.flatnonzero(
-                mask & (hypothesis_counts > 0)
-            )
-            if candidates.size == 0:
-                return None
-            order = np.lexsort((
-                prior_deltas[candidates],
-                hypothesis_rmse[candidates],
-                -hypothesis_counts[candidates],
-            ))
-            return int(candidates[order[0]])
-
-        best_index = select_hypothesis(
-            valid_hypotheses
-            & (slopes <= self.config.max_plane_slope_deg)
-        )
-        if best_index is None:
-            # Preserve rejected-slope diagnostics when no acceptable
-            # hypothesis exists, without allowing a steep dominant object to
-            # hide a valid terrain hypothesis when one is available.
-            best_index = select_hypothesis(valid_hypotheses)
-        if best_index is None:
-            return None
-        best_normal = normals[best_index]
-        best_d = float(offsets[best_index])
-
-        distances = np.abs(sample @ best_normal + best_d)
-        inliers = sample[distances < self.config.distance_threshold]
-        if inliers.shape[0] < 3:
-            return None
-
-        center, normal, d = self._robust_refine_plane(
-            inliers,
-            best_normal,
-        )
-        distances = np.abs(sample @ normal + d)
-        inlier_mask = distances < self.config.distance_threshold
-        refined_inliers = sample[inlier_mask]
-        if refined_inliers.shape[0] >= 3:
-            center, normal, d = self._robust_refine_plane(
-                refined_inliers,
-                normal,
-            )
-        if refined_inliers.shape[0] < 3:
-            return None
-
-        if normal[2] < 0.0:
-            normal = -normal
-            d = -d
-        central_distances = np.abs(central_sample @ normal + d)
-        central_inlier_mask = (
-            central_distances < self.config.distance_threshold
-        )
-        central_inliers = central_sample[central_inlier_mask]
-        if central_inliers.shape[0] < 3:
-            return None
-        inlier_count = int(central_inliers.shape[0])
-        inlier_ratio = inlier_count / float(sample_count)
-        minor_stddev, major_stddev = self._principal_stddev_xy(
-            central_inliers
-        )
-        slope_deg = self._slope_from_world_normal(normal)
-        rmse = float(np.sqrt(np.mean(np.square(
-            central_distances[central_inlier_mask]
-        ))))
-
-        rejection_reasons = []
-        if (
-            inlier_count < thresholds.min_inliers
-            or inlier_ratio < self.config.min_cell_inlier_ratio
-        ):
-            rejection_reasons.append("inliers")
-        if minor_stddev < thresholds.min_principal_stddev:
-            rejection_reasons.append("coverage")
-        if rmse > self.config.max_cell_rmse:
-            rejection_reasons.append("rmse")
-        if slope_deg > self.config.max_plane_slope_deg:
-            rejection_reasons.append("slope")
-
-        grid_x, grid_y = self._grid_center_xy(cell.key)
-        if abs(float(normal[2])) >= 1e-6:
-            grid_z = float(
-                center[2]
-                - (
-                    normal[0] * (grid_x - center[0])
-                    + normal[1] * (grid_y - center[1])
-                ) / normal[2]
-            )
-        else:
-            grid_z = float(np.median(refined_inliers[:, 2]))
-        grid_center = np.asarray(
-            [grid_x, grid_y, grid_z],
-            dtype=np.float64,
-        )
-        footprint = self._plane_footprint(
-            cell.key,
-            grid_center,
-            normal,
-        )
-        half_size = self.config.cell_size_m * 0.5
-        rejection_reason = (
-            ", ".join(rejection_reasons)
-            if rejection_reasons
-            else None
-        )
-
-        return {
-            "center_world": grid_center.astype(np.float32),
-            "normal_world": normal.astype(np.float32),
-            "slope_deg": slope_deg,
-            "inlier_count": inlier_count,
-            "sample_count": sample_count,
-            "inlier_ratio": inlier_ratio,
-            "rmse": rmse,
-            "inlier_principal_stddev_minor": minor_stddev,
-            "inlier_principal_stddev_major": major_stddev,
-            "extents": (half_size, half_size),
-            "rejection_reason": rejection_reason,
-            "column_key": cell.key,
-            "footprint_world": footprint,
-            "footprint_local": None,
-            "grid_center_world": grid_center.astype(np.float32),
-            "observation_count": cell.observation_count,
-            "last_seen": cell.last_point_seen,
-            "show_label": rejection_reason is not None,
-        }
 
     def _cell_points(self, cell: LocalTerrainCell) -> np.ndarray:
         if not cell.batches:
@@ -1242,7 +919,7 @@ class TerrainGeometryEstimator:
             key
             for key in self._cells
             if float(np.sum(np.square(
-                np.asarray(self._grid_center_xy(key)) - rover_xy
+                np.asarray(self._fitter.grid_center_xy(key)) - rover_xy
             ))) > retention_squared
         ]
         self._remove_cells(keys_to_remove)
@@ -1291,140 +968,8 @@ class TerrainGeometryEstimator:
             cell
             for cell in self._cells.values()
             if float(np.sum(np.square(
-                np.asarray(self._grid_center_xy(cell.key)) - rover_xy
+                np.asarray(self._fitter.grid_center_xy(cell.key)) - rover_xy
             ))) <= radius_squared
         ]
         visible.sort(key=lambda cell: cell.key)
         return visible
-
-    def _world_key(self, point_world: np.ndarray) -> tuple[int, int]:
-        return (
-            math.floor(float(point_world[0]) / self.config.cell_size_m),
-            math.floor(float(point_world[1]) / self.config.cell_size_m),
-        )
-
-    def _grid_center_xy(
-        self,
-        key: tuple[int, int],
-    ) -> tuple[float, float]:
-        size = self.config.cell_size_m
-        return (
-            (key[0] + 0.5) * size,
-            (key[1] + 0.5) * size,
-        )
-
-    def _horizontal_footprint(
-        self,
-        key: tuple[int, int],
-        height: float,
-    ) -> np.ndarray:
-        size = self.config.cell_size_m
-        x0 = key[0] * size
-        x1 = x0 + size
-        y0 = key[1] * size
-        y1 = y0 + size
-        return np.asarray(
-            [
-                [x0, y0, height],
-                [x1, y0, height],
-                [x1, y1, height],
-                [x0, y1, height],
-            ],
-            dtype=np.float32,
-        )
-
-    def _plane_footprint(
-        self,
-        key: tuple[int, int],
-        center: np.ndarray,
-        normal: np.ndarray,
-    ) -> np.ndarray:
-        if abs(float(normal[2])) < 1e-6:
-            return self._horizontal_footprint(key, float(center[2]))
-        size = self.config.cell_size_m
-        x0 = key[0] * size
-        x1 = x0 + size
-        y0 = key[1] * size
-        y1 = y0 + size
-        corners = []
-        for x, y in ((x0, y0), (x1, y0), (x1, y1), (x0, y1)):
-            z = center[2] - (
-                normal[0] * (x - center[0])
-                + normal[1] * (y - center[1])
-            ) / normal[2]
-            corners.append((x, y, z))
-        return np.asarray(corners, dtype=np.float32)
-
-    def _normalize(self, vector: np.ndarray) -> Optional[np.ndarray]:
-        length = float(np.linalg.norm(vector))
-        if length < 1e-6:
-            return None
-        return vector / length
-
-    def _refine_plane(
-        self,
-        points: np.ndarray,
-        initial_normal: np.ndarray,
-    ) -> tuple[np.ndarray, np.ndarray, float]:
-        center = points.mean(axis=0)
-        _, _, vh = np.linalg.svd(points - center, full_matrices=False)
-        normal = vh[-1]
-        normal /= np.linalg.norm(normal)
-        if np.dot(normal, initial_normal) < 0.0:
-            normal = -normal
-        d = -float(np.dot(normal, center))
-        return center, normal, d
-
-    def _robust_refine_plane(
-        self,
-        points: np.ndarray,
-        initial_normal: np.ndarray,
-    ) -> tuple[np.ndarray, np.ndarray, float]:
-        center, normal, d = self._refine_plane(points, initial_normal)
-        huber_delta = self.config.distance_threshold
-        for _ in range(self.config.robust_refinement_iterations):
-            residuals = np.abs(points @ normal + d)
-            weights = np.ones(points.shape[0], dtype=np.float64)
-            outside = residuals > huber_delta
-            weights[outside] = huber_delta / np.maximum(
-                residuals[outside],
-                1e-12,
-            )
-            weight_sum = float(np.sum(weights))
-            if weight_sum <= 1e-9:
-                break
-            center = np.sum(
-                points * weights[:, None],
-                axis=0,
-            ) / weight_sum
-            centered = points - center
-            covariance = (
-                (centered * weights[:, None]).T @ centered
-            ) / weight_sum
-            _, eigenvectors = np.linalg.eigh(covariance)
-            updated_normal = eigenvectors[:, 0]
-            updated_normal /= max(
-                float(np.linalg.norm(updated_normal)),
-                1e-9,
-            )
-            if float(np.dot(updated_normal, normal)) < 0.0:
-                updated_normal = -updated_normal
-            normal = updated_normal
-            d = -float(np.dot(normal, center))
-        return center, normal, d
-
-    def _principal_stddev_xy(
-        self,
-        points_world: np.ndarray,
-    ) -> tuple[float, float]:
-        xy = np.asarray(points_world[:, [0, 1]], dtype=np.float64)
-        centered = xy - np.mean(xy, axis=0)
-        covariance = centered.T @ centered / xy.shape[0]
-        eigenvalues = np.maximum(np.linalg.eigvalsh(covariance), 0.0)
-        deviations = np.sqrt(eigenvalues)
-        return float(deviations[0]), float(deviations[1])
-
-    def _slope_from_world_normal(self, normal_world: np.ndarray) -> float:
-        normal = normal_world / np.linalg.norm(normal_world)
-        cosine = abs(float(normal[2]))
-        return math.degrees(math.acos(float(np.clip(cosine, -1.0, 1.0))))

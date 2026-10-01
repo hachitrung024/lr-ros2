@@ -1,9 +1,11 @@
 import time
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 import rclpy
 from builtin_interfaces.msg import Time
+from diagnostic_msgs.msg import DiagnosticStatus
 from rclpy.executors import SingleThreadedExecutor
 from rclpy.parameter import Parameter
 from rclpy.qos import QoSProfile, ReliabilityPolicy
@@ -129,3 +131,39 @@ def test_node_publishes_rgb_overlay(ros_context):
         node.destroy_node()
         driver.destroy_node()
         executor.shutdown()
+
+
+def test_diagnostics_report_inference_failure_recovery_and_staleness(ros_context):
+    class FailingModel(FakeSegmentationModel):
+        fail = True
+
+        def predict(self, *args, **kwargs):
+            if self.fail:
+                raise RuntimeError('inference unavailable')
+            return super().predict(*args, **kwargs)
+
+    model = FailingModel()
+    node = SegmentationNode(model_factory=lambda **kwargs: model)
+    diagnostics = []
+    masks = []
+    node._diagnostics = SimpleNamespace(publish=diagnostics.append)
+    node._mask_publisher = SimpleNamespace(publish=masks.append)
+    try:
+        node._on_image(make_color_image())
+        node._publish_diagnostics()
+        assert not masks
+        assert diagnostics[-1].status[0].level == DiagnosticStatus.WARN
+        assert 'inference unavailable' in diagnostics[-1].status[0].message
+        model.fail = False
+        node._on_image(make_color_image())
+        node._publish_diagnostics()
+        assert len(masks) == 1
+        assert diagnostics[-1].status[0].level == DiagnosticStatus.OK
+        node._last_success_ns -= 3_000_000_000
+        node._publish_diagnostics()
+        assert 'stale' in diagnostics[-1].status[0].message
+        node._on_time_jump(None)
+        node._publish_diagnostics()
+        assert diagnostics[-1].status[0].level == DiagnosticStatus.WARN
+    finally:
+        node.destroy_node()

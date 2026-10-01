@@ -99,7 +99,7 @@ fi
 echo "============================================================"
 echo " Base image : ${BASE_IMAGE}"
 echo " Output tag : ${OUTPUT_IMAGE}"
-echo " Context    : ${SCRIPT_DIR}"
+echo " Context    : ${REPO_ROOT} (filtered by Dockerfile.dockerignore)"
 echo "============================================================"
 
 docker build \
@@ -107,6 +107,6 @@ docker build \
   --build-arg "BASE_IMAGE=${BASE_IMAGE}" \
   --build-arg "LR_PLATFORM=desktop" \
   --file "${SCRIPT_DIR}/Dockerfile" \
-  "${SCRIPT_DIR}"
+  "${REPO_ROOT}"
 
 echo ">>> Built LR environment image: ${OUTPUT_IMAGE}"

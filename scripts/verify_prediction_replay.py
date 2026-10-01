@@ -29,6 +29,8 @@ def main():
     parser.add_argument('--model', default='models/best.pt')
     parser.add_argument('--output', default='log/prediction-replay-smoke')
     parser.add_argument('--headless', action='store_true')
+    parser.add_argument('--svo-realtime', choices=('true', 'false'), default='true')
+    parser.add_argument('--recovery-timeout', type=float, default=30.0)
     args = parser.parse_args()
     output = Path(args.output)
     output.mkdir(parents=True, exist_ok=True)
@@ -43,6 +45,7 @@ def main():
         'mavlink:=true',
         'future_path:=true',
         f'svo_path:={args.svo}',
+        f'svo_realtime:={args.svo_realtime}',
         'prediction_profile:=dynamic',
     ]
     if args.headless:
@@ -142,7 +145,7 @@ def main():
             lambda: any(
                 m.source_trajectory_id >= first_new_id for m in predictions[start_prediction:]
             ),
-            timeout=30,
+            timeout=args.recovery_timeout,
         )
         new_states = [m for m in states[start_state:] if seconds(m.header.stamp) < old_clock - 1]
         assert new_states and not new_states[0].acceleration_valid

@@ -27,42 +27,50 @@ def _as_numpy(value) -> np.ndarray:
     return np.asarray(value)
 
 
-def _resize_masks_nearest(
-    masks: np.ndarray,
+def _restore_labels(
+    labels: np.ndarray,
     height: int,
     width: int,
 ) -> np.ndarray:
-    if masks.shape[1:] == (height, width):
-        return masks
-    source_height, source_width = masks.shape[1:]
+    """Remove centered letterbox padding before mapping labels to source pixels."""
+    if labels.shape == (height, width):
+        return labels
+    source_height, source_width = labels.shape
+    gain = min(source_height / height, source_width / width)
+    scaled_height, scaled_width = round(height * gain), round(width * gain)
+    top = round((source_height - scaled_height) / 2 - 0.1)
+    left = round((source_width - scaled_width) / 2 - 0.1)
     rows = np.minimum(
-        (np.arange(height) * source_height // height),
-        source_height - 1,
+        (np.arange(height) * scaled_height // height),
+        scaled_height - 1,
     )
     columns = np.minimum(
-        (np.arange(width) * source_width // width),
-        source_width - 1,
+        (np.arange(width) * scaled_width // width),
+        scaled_width - 1,
     )
-    return masks[:, rows][:, :, columns]
+    return labels[(rows + top)[:, None], (columns + left)[None, :]]
 
 
 def _instance_labels(result, height: int, width: int) -> np.ndarray:
-    labels = np.zeros((height, width), dtype=np.uint16)
     result_masks = getattr(result, "masks", None)
     mask_data = getattr(result_masks, "data", None)
     if mask_data is None:
-        return labels
+        return np.zeros((height, width), dtype=np.uint16)
 
     masks = _as_numpy(mask_data)
-    if masks.ndim != 3 or masks.shape[0] == 0:
-        return labels
-    masks = _resize_masks_nearest(masks, height, width)
+    if masks.ndim != 3 or min(masks.shape[1:]) <= 0:
+        raise ValueError("segmentation masks must have shape (N, H, W)")
+    # Resolve overlapping instances before resizing. Nearest-neighbor sampling
+    # preserves the result while allocating only one source-resolution image.
+    labels = np.zeros(masks.shape[1:], dtype=np.uint16)
     instance_count = min(masks.shape[0], np.iinfo(np.uint16).max)
 
     boxes = getattr(result, "boxes", None)
     confidences = getattr(boxes, "conf", None)
     if confidences is not None:
         scores = _as_numpy(confidences).reshape(-1)[:instance_count]
+        if scores.size != instance_count:
+            raise ValueError("mask and confidence counts differ")
         order = np.argsort(-scores, kind="stable")
     else:
         order = np.arange(instance_count)
@@ -70,7 +78,7 @@ def _instance_labels(result, height: int, width: int) -> np.ndarray:
     for index in order:
         pixels = (masks[index] > 0.5) & (labels == 0)
         labels[pixels] = int(index) + 1
-    return labels
+    return _restore_labels(labels, height, width)
 
 
 class UltralyticsSegmentationModel:

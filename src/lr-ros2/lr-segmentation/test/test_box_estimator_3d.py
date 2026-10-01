@@ -5,12 +5,15 @@ import numpy as np
 import pytest
 import rclpy
 from builtin_interfaces.msg import Time
+from diagnostic_msgs.msg import DiagnosticStatus
+from geometry_msgs.msg import TransformStamped
 from rclpy.executors import SingleThreadedExecutor
 from rclpy.parameter import Parameter
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from safety_perception_msgs.msg import TrackedObjectArray
 from sensor_msgs.msg import CameraInfo, Image
 from std_msgs.msg import Header
+from tf2_ros import TransformBroadcaster
 from visualization_msgs.msg import Marker, MarkerArray
 from vision_msgs.msg import Detection3DArray
 
@@ -18,13 +21,13 @@ from lr_segmentation.box_estimator_3d import (
     BoxEstimator3DNode,
     BoxMeasurement,
     BoxTracker,
-    _polygon_is_simple,
-    _triangulate_polygon_xy,
     depth_message_to_meters,
     fit_oriented_box,
     fit_projected_footprint,
     instance_mask_message_to_labels,
 )
+from lr_segmentation.box_geometry import _polygon_is_simple
+from lr_segmentation.box_outputs import _triangulate_polygon_xy
 from lr_segmentation.conversions import labels_to_image_message
 
 
@@ -348,3 +351,135 @@ def test_seek_clears_buffers_and_markers_without_publishing_free_space(ros_conte
         assert markers[-1].markers[0].action == Marker.DELETEALL
     finally:
         node.destroy_node()
+
+
+@pytest.fixture
+def capturing_box_node(ros_context):
+    node = BoxEstimator3DNode(
+        node_name="box_observation_test",
+        parameter_overrides=[
+            Parameter("sampling_stride", value=1),
+            Parameter("minimum_points_per_instance", value=3),
+        ],
+    )
+    node._camera_info = camera_info()
+    node.observations, node.diagnostics = [], []
+    node._box_publisher = SimpleNamespace(publish=lambda message: None)
+    node._footprint_publisher = SimpleNamespace(publish=node.observations.append)
+    node._marker_publisher = SimpleNamespace(
+        publish=lambda message: None, get_subscription_count=lambda: 0
+    )
+    node._diagnostics = SimpleNamespace(publish=node.diagnostics.append)
+    yield node
+    node.destroy_node()
+
+
+@pytest.mark.parametrize('depth_value', [np.nan, 0.0, 0.1, 30.0])
+def test_unobservable_instance_never_becomes_empty_observation(capturing_box_node, depth_value):
+    node = capturing_box_node
+    header = Header(stamp=Time(sec=10), frame_id="camera_optical")
+    labels = np.ones((10, 12), dtype=np.uint16)
+    node._estimate_pair(
+        labels_to_image_message(labels, header),
+        depth_message(np.full(labels.shape, depth_value), header),
+    )
+    assert not node.observations
+    node._publish_diagnostics()
+    assert node.diagnostics[-1].status[0].level == DiagnosticStatus.WARN
+    assert 'insufficient valid depth' in node.diagnostics[-1].status[0].message
+
+
+def test_partial_depth_failure_keeps_known_objects_and_reports_missing_depth(capturing_box_node):
+    node = capturing_box_node
+    header = Header(stamp=Time(sec=10), frame_id="camera_optical")
+    labels = np.ones((10, 12), dtype=np.uint16)
+    labels[:, 6:] = 2
+    depths = np.full(labels.shape, 2.0)
+    depths[:, 6:] = np.nan
+    for _ in range(2):
+        node._estimate_pair(labels_to_image_message(labels, header), depth_message(depths, header))
+    assert len(node.observations) == 1
+    assert len(node.observations[0].objects) == 1
+    node._publish_diagnostics()
+    assert node.diagnostics[-1].status[0].level == DiagnosticStatus.WARN
+    assert 'Partial observation' in node.diagnostics[-1].status[0].message
+
+
+def test_confirmation_and_valid_empty_observations(capturing_box_node):
+    node = capturing_box_node
+    labels = np.ones((10, 12), dtype=np.uint16)
+    for sec in (10, 11):
+        header = Header(stamp=Time(sec=sec), frame_id="camera_optical")
+        node._estimate_pair(
+            labels_to_image_message(labels, header),
+            depth_message(np.full(labels.shape, 2.0), header),
+        )
+        assert len(node.observations) == sec - 10
+    assert len(node.observations[-1].objects) == 1
+    node._estimate_pair(
+        labels_to_image_message(np.zeros_like(labels), header),
+        depth_message(np.full(labels.shape, 2.0), header),
+    )
+    assert node.observations[-1].objects == []
+    node._publish_diagnostics()
+    assert node.diagnostics[-1].status[0].level == DiagnosticStatus.OK
+    node._last_success_ns -= 3_000_000_000
+    node._publish_diagnostics()
+    assert 'stale' in node.diagnostics[-1].status[0].message
+
+
+def test_late_tf_is_received_and_pending_pair_is_retried(capturing_box_node):
+    node = capturing_box_node
+    # The node's listener and its callbacks share one executor.
+    from tf2_ros import Buffer, TransformListener
+    node._output_frame = 'box_test_map'
+    node._tf_buffer = Buffer()
+    node._tf_listener = TransformListener(node._tf_buffer, node, spin_thread=False)
+    node._tracker._min_confirmations = 1
+    driver = rclpy.create_node('box_late_tf_driver')
+    broadcaster = TransformBroadcaster(driver)
+    executor = SingleThreadedExecutor()
+    executor.add_node(node)
+    executor.add_node(driver)
+    header = Header(stamp=Time(sec=10), frame_id='camera_optical')
+    transform = TransformStamped(
+        header=Header(stamp=header.stamp, frame_id=node._output_frame),
+        child_frame_id=header.frame_id,
+    )
+    transform.transform.rotation.w = 1.0
+    try:
+        assert spin_until(executor, lambda: broadcaster.pub_tf.get_subscription_count() > 0)
+        node._on_mask(labels_to_image_message(np.ones((10, 12), dtype=np.uint16), header))
+        node._on_depth(depth_message(np.full((10, 12), 2.0), header))
+        assert node._pending_pair is not None
+        assert not node.observations
+        driver.create_timer(0.01, lambda: broadcaster.sendTransform(transform))
+        assert spin_until(executor, lambda: bool(node.observations))
+        assert len(node.observations) == 1
+        assert node.observations[0].header.frame_id == node._output_frame
+        assert node._tf_failures == 0
+    finally:
+        executor.shutdown()
+        driver.destroy_node()
+
+
+def test_tf_expiry_and_rewind_discard_pending_pairs(capturing_box_node):
+    from tf2_ros import LookupException
+    node = capturing_box_node
+
+    def missing_transform(header):
+        raise LookupException('missing transform')
+
+    node._output_transform = missing_transform
+    header = Header(stamp=Time(sec=10), frame_id='camera_optical')
+    mask = labels_to_image_message(np.ones((10, 12), dtype=np.uint16), header)
+    depth = depth_message(np.full((10, 12), 2.0), header)
+    node._pending_pair = (mask, depth, time.monotonic() - 1)
+    node._try_estimate()
+    assert node._pending_pair is None
+    assert node._tf_failures == 1
+    assert not node.observations
+    node._pending_pair = (mask, depth, time.monotonic() + 10)
+    node._on_time_jump(None)
+    assert node._pending_pair is None
+    assert not node.observations

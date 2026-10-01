@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
-from lr_segmentation.model import UltralyticsSegmentationModel
+from lr_segmentation.model import UltralyticsSegmentationModel, _instance_labels
 
 
 @pytest.mark.parametrize(
@@ -95,3 +95,31 @@ def test_model_returns_rendered_overlay(tmp_path, monkeypatch):
     assert no_overlay.overlay_bgr is None
     assert calls['plot'] == 1
     np.testing.assert_array_equal(no_overlay.instance_labels, prediction.instance_labels)
+
+
+@pytest.mark.parametrize('portrait', [False, True])
+def test_masks_remove_stride_padding_before_alignment_with_depth(portrait):
+    # 1280x720 at imgsz=960 becomes 960x540 plus two rows of padding on each side.
+    mask = np.zeros((544, 960), dtype=np.float32)
+    mask[2:92] = 1
+    if portrait:
+        mask = mask.T
+    height, width = (1280, 720) if portrait else (720, 1280)
+    result = SimpleNamespace(masks=SimpleNamespace(data=mask[None]), boxes=None)
+    labels = _instance_labels(result, height, width)
+    if portrait:
+        labels = labels.T
+    expected = np.zeros((720, 1280), dtype=np.uint16)
+    expected[:120] = 1
+    np.testing.assert_array_equal(labels, expected)
+
+
+def test_odd_letterbox_padding_and_overlapping_instances():
+    masks = np.zeros((2, 9, 8), dtype=np.float32)
+    masks[0, 2:6, :5] = 1
+    masks[1, 2:6, 3:] = 1
+    result = SimpleNamespace(
+        masks=SimpleNamespace(data=masks), boxes=SimpleNamespace(conf=np.array([0.4, 0.9]))
+    )
+    labels = _instance_labels(result, 4, 8)
+    np.testing.assert_array_equal(labels, np.tile([1, 1, 1, 2, 2, 2, 2, 2], (4, 1)))

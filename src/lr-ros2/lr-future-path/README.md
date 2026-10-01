@@ -1,8 +1,9 @@
 # LR Future Path
 
 This package builds and replays an offline future ground-truth path for ZED
-SVO datasets. It is an evaluation/visualization oracle, not a route planner
-and must not be consumed by prediction or rover control.
+SVO datasets. It supplies the recorded future trajectory to the offline
+prediction/evaluation pipeline. It is not a route planner and must not be
+used for live rover control.
 
 The first enabled launch performs a headless, non-real-time SVO pass and
 records ZED map poses into a rosbag2 directory. Later launches load that cache

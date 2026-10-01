@@ -1,7 +1,2 @@
-torch>=2.1,<3
-ultralytics>=8.3,<9
-# ROS 2 Humble's colcon-core requires setuptools below 80, while current
-# PyTorch requires at least 77.
-setuptools>=77,<80
-packaging>=24,<26
-opencv-python>=4.8,<6
+# Compatibility entry point; the ROS package owns Python requirements.
+-r ../src/lr-ros2/lr-segmentation/requirements.txt

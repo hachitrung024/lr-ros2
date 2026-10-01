@@ -9,6 +9,13 @@ It deliberately does **not** contain the LR repository, colcon build products,
 models, SVO recordings, or MAVLink databases. Mount those at runtime and build
 the mounted workspace inside the container.
 
+Python requirements are owned by
+`src/lr-ros2/lr-segmentation/requirements.txt`; `docker/requirements-lr.txt`
+is a compatibility include. Both build scripts use the repository root as
+context, filtered by `docker/Dockerfile.dockerignore` to include only the
+Dockerfile, installation script and requirements. A direct Docker build must
+likewise run from the repository root with `-f docker/Dockerfile`.
+
 ## Build the desktop environment
 
 From the repository root:

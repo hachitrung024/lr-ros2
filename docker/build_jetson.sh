@@ -175,7 +175,7 @@ echo " JetPack     : ${JETPACK_LABEL}"
 echo " Torch index : ${TORCH_INDEX_URL}"
 echo " PyTorch     : ${TORCH_SPEC} / ${TORCHVISION_SPEC}"
 echo " Output tag  : ${OUTPUT_IMAGE}"
-echo " Context     : ${SCRIPT_DIR}"
+echo " Context     : ${REPO_ROOT} (filtered by Dockerfile.dockerignore)"
 echo "============================================================"
 
 docker build \
@@ -186,6 +186,6 @@ docker build \
   --build-arg "TORCH_SPEC=${TORCH_SPEC}" \
   --build-arg "TORCHVISION_SPEC=${TORCHVISION_SPEC}" \
   --file "${SCRIPT_DIR}/Dockerfile" \
-  "${SCRIPT_DIR}"
+  "${REPO_ROOT}"
 
 echo ">>> Built LR Jetson environment image: ${OUTPUT_IMAGE}"

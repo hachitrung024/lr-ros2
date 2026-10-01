@@ -77,6 +77,8 @@ install(TARGETS ${PROJECT_NAME}_plugins
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   find_package(ament_cmake_pytest REQUIRED)
+  find_package(ament_cmake_gtest REQUIRED)
+  set(ament_cmake_clang_format_CONFIG_FILE "${CMAKE_CURRENT_SOURCE_DIR}/.clang-format")
   ament_lint_auto_find_test_dependencies()
   ament_add_pytest_test(test_display_zed_cam_launch
     test/test_display_zed_cam_launch.py
@@ -84,6 +86,8 @@ if(BUILD_TESTING)
   ament_add_pytest_test(test_distributed_launch
     test/test_distributed_launch.py
   )
+  ament_add_gtest(test_svo_control_panel test/test_svo_control_panel.cpp)
+  target_link_libraries(test_svo_control_panel ${PROJECT_NAME}_plugins Qt5::Widgets)
 endif()
 
 ###############################################################################
