@@ -85,11 +85,32 @@ future_path_rebuild_cache to true to force preprocessing again, or set
 future_path_cache_dir to choose another cache root.
 
 The output is a nav_msgs/msg/Path on /lr/future_path/ground_truth. By default
-it is sampled every 0.2 m and bounded by both 15 m of cumulative XY travel and
-20 seconds. Small sub-step fluctuations are not accumulated into fake travel,
+it is spatially sampled at approximately 0.2 m inside a 15 m XY radius, with
+no time cap (`future_path_horizon_s:=0`). Loops are limited to twice the radius
+of travel. Small sub-step fluctuations are not accumulated into fake travel,
 so loops and stationary jitter cannot create an unbounded path. It is future
 ground-truth for offline evaluation only, not a route planner or a control
 input.
+
+The default RViz **Future Path** display uses the full source snapshot matched
+to prediction when prediction is enabled. `display_zed_cam.launch.py` remaps
+its input to `/lr/path_prediction/reference_path`; prediction points share
+exactly that path's XYZ and cycle. When prediction is unavailable, the
+visualizer keeps a fresh source path with gray unevaluated points. In
+future-path-only mode the launch displays the source topic directly.
+
+For the separate RViz laptop launch, `prediction_enabled:=true` (default)
+selects the aligned view. Set `prediction_enabled:=false` for a backend that
+publishes only future path. The optional **Prediction Reference (Cycle Synced)**
+display reads the same aligned output; enable only one path display at a time.
+
+To tune the source path, use `future_path_radius_m:=15.0`,
+`future_path_step_m:=0.2`, `future_path_smoothing_window_m:=0.8`,
+`future_path_smoothing_max_deviation_m:=0.2`, and
+`future_path_display_hold_s:=1.5`. Smoothing changes only the processed future
+path; pose/TF are unchanged. Set the smoothing window to zero to disable it.
+The latched path survives late RViz subscriptions and short input gaps; the
+hold timer uses ROS time and stays paused with SVO playback.
 
 ### MAVLink localization for SVO
 
@@ -136,6 +157,12 @@ terrain heatmap is shown as an Image dock inside the main RViz window, in the
 former Depth Map position. The ZED Depth Map remains available but is disabled
 by default. The central 3D Terrain group remains disabled by default and can be
 enabled for GridMap and marker debugging.
+
+Terrain uses `future_path_topic` to restrict accumulation and plane fitting to
+a corridor around the path (1 m half width by default, plus boundary cells and
+fitting support). When the path is unavailable, stale or invalid, it processes
+the original ROI. Configure `corridor.*` in the terrain YAML; set
+`corridor.enabled: false` to disable this optimization.
 
 Instance segmentation starts automatically when an external checkpoint path
 is provided:

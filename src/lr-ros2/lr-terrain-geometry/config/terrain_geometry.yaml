@@ -1,6 +1,11 @@
 terrain_geometry:
   ros__parameters:
     input.point_cloud_topic: /zed/zed_node/point_cloud/cloud_registered
+    input.trajectory_topic: /lr/future_path/ground_truth
+    corridor.enabled: true  # Missing/stale paths suspend terrain; false explicitly enables full ROI.
+    corridor.half_width_m: 1.0
+    corridor.stale_after_sec: 1.0
+    corridor.future_tolerance_sec: 0.2
     frames.map_frame: map
     tf.lookup_timeout_sec: 0.1
     diagnostics.period_sec: 1.0

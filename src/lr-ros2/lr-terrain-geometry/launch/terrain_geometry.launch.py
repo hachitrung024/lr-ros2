@@ -15,6 +15,14 @@ def launch_setup(context, *args, **kwargs):
     point_cloud_topic = LaunchConfiguration("point_cloud_topic").perform(context)
     if not point_cloud_topic:
         point_cloud_topic = f"/{camera_name}/zed_node/point_cloud/cloud_registered"
+    overrides = {
+        "input.point_cloud_topic": point_cloud_topic,
+        "frames.map_frame": LaunchConfiguration("map_frame"),
+        "use_sim_time": LaunchConfiguration("use_sim_time"),
+    }
+    trajectory_topic = LaunchConfiguration("trajectory_topic").perform(context)
+    if trajectory_topic:
+        overrides["input.trajectory_topic"] = trajectory_topic
     return [
         Node(
             package="lr_terrain_geometry",
@@ -23,11 +31,7 @@ def launch_setup(context, *args, **kwargs):
             output="screen",
             parameters=[
                 LaunchConfiguration("terrain_params_file"),
-                {
-                    "input.point_cloud_topic": point_cloud_topic,
-                    "frames.map_frame": LaunchConfiguration("map_frame"),
-                    "use_sim_time": LaunchConfiguration("use_sim_time"),
-                },
+                overrides,
             ],
         )
     ]
@@ -43,6 +47,7 @@ def generate_launch_description():
         [
             DeclareLaunchArgument("camera_name", default_value="zed"),
             DeclareLaunchArgument("point_cloud_topic", default_value=""),
+            DeclareLaunchArgument("trajectory_topic", default_value=""),
             DeclareLaunchArgument("map_frame", default_value="map"),
             DeclareLaunchArgument("use_sim_time", default_value="false"),
             DeclareLaunchArgument(

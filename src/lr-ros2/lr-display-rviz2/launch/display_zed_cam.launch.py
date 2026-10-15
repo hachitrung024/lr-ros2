@@ -153,7 +153,7 @@ def launch_setup(context, *args, **kwargs):
     mavlink_body_to_camera_val = [0.0] * 6
     future_path_radius_val = 15.0
     future_path_step_val = 0.2
-    future_path_horizon_val = 20.0
+    future_path_horizon_val = 0.0
     future_path_stationary_speed_val = 0.1
     future_path_max_speed_val = 5.0
     if future_path_val:
@@ -180,7 +180,7 @@ def launch_setup(context, *args, **kwargs):
                 )
                 or future_path_radius_val <= 0.0
                 or future_path_step_val <= 0.0
-                or future_path_horizon_val <= 0.0
+                or future_path_horizon_val < 0.0
                 or future_path_stationary_speed_val < 0.0
                 or future_path_max_speed_val <= future_path_stationary_speed_val
             ):
@@ -189,6 +189,20 @@ def launch_setup(context, *args, **kwargs):
             return _stop_launch(
                 'Future-path distance, step, horizon, and speed thresholds are invalid.'
             )
+    try:
+        future_path_processing = {
+            name: float(LaunchConfiguration(f'future_path_{name}', default=str(default)).perform(
+                context
+            ))
+            for name, default in (
+                ('smoothing_window_m', 0.8), ('smoothing_max_deviation_m', 0.2),
+                ('display_hold_s', 1.5),
+            )
+        }
+        if not all(math.isfinite(v) and v >= 0 for v in future_path_processing.values()):
+            raise ValueError
+    except ValueError:
+        return _stop_launch('Future-path smoothing and hold parameters must be non-negative.')
     if mavlink_val:
         try:
             mavlink_match_tolerance_val = float(mavlink_match_tolerance_s.perform(context))
@@ -256,6 +270,12 @@ def launch_setup(context, *args, **kwargs):
 
     # RVIZ2 node
     rviz_remappings = []
+    if camera_type == 'stereo':
+        rviz_remappings.append((
+            '/lr/future_path/ground_truth',
+            '/lr/path_prediction/reference_path' if start_prediction_val == 'true'
+            else future_path_topic.perform(context),
+        ))
     if camera_type == 'stereo' and start_segmentation_val != 'true':
         rviz_remappings.append(
             ('/segmentation/overlay', f'/{camera_name_val}/zed_node/rgb/color/rect/image')
@@ -337,6 +357,7 @@ def launch_setup(context, *args, **kwargs):
                     'stationary_speed_mps': future_path_stationary_speed_val,
                     'max_speed_mps': future_path_max_speed_val,
                     'max_points': 1000,
+                    **future_path_processing,
                     'use_sim_time': True,
                 }
             ],
@@ -364,6 +385,7 @@ def launch_setup(context, *args, **kwargs):
                 launch_arguments={
                     'camera_name': camera_name_val,
                     'terrain_params_file': terrain_params_file,
+                    'trajectory_topic': future_path_topic,
                     'map_frame': map_frame,
                     'use_sim_time': publish_svo_clock,
                 }.items(),
@@ -465,6 +487,7 @@ def launch_setup(context, *args, **kwargs):
                 'horizon_s': future_path_horizon_val,
                 'max_gap_s': 1.0,
                 'max_points': 1000,
+                **future_path_processing,
                 'use_sim_time': publish_svo_clock,
             }
         ],
@@ -630,7 +653,7 @@ def generate_launch_description(
             DeclareLaunchArgument(
                 'future_path_radius_m',
                 default_value='15.0',
-                description='Maximum cumulative XY look-ahead distance in metres.',
+                description='XY radius around the current pose; stop at the first exit.',
             ),
             DeclareLaunchArgument(
                 'future_path_step_m',
@@ -639,8 +662,20 @@ def generate_launch_description(
             ),
             DeclareLaunchArgument(
                 'future_path_horizon_s',
-                default_value='20.0',
-                description='Maximum future look-ahead time in seconds.',
+                default_value='0.0',
+                description='Optional time cap in seconds; 0 uses the spatial radius only.',
+            ),
+            DeclareLaunchArgument(
+                'future_path_smoothing_window_m', default_value='0.8',
+                description='Spatial smoothing window in metres; 0 disables smoothing.',
+            ),
+            DeclareLaunchArgument(
+                'future_path_smoothing_max_deviation_m', default_value='0.2',
+                description='Maximum displacement from the recorded polyline when smoothing.',
+            ),
+            DeclareLaunchArgument(
+                'future_path_display_hold_s', default_value='1.5',
+                description='Retain the last path across short input gaps, using ROS time.',
             ),
             DeclareLaunchArgument(
                 'future_path_stationary_speed_mps',

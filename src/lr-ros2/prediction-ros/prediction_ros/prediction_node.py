@@ -242,6 +242,10 @@ class PredictionNode:
                 level=DiagnosticStatus.OK if self._waiting == "ready" else DiagnosticStatus.WARN,
                 message=self._waiting,
                 values=[
+                    KeyValue(key="trajectory_id", value=str(
+                        -1 if self._active_trajectory is None
+                        else self._active_trajectory.trajectory_id
+                    )),
                     KeyValue(key="output_count", value=str(self._output_count)),
                     KeyValue(key="callback_ms", value=str(self._callback_ms)),
                     KeyValue(key="callback_ms_ema", value=str(self._callback_ms_ema)),

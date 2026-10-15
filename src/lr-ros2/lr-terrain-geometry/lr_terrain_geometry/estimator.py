@@ -12,6 +12,7 @@ from .plane_fitting import PlaneFitter
 from .terrain_types import (
     EffectiveCellThresholds, LocalTerrainCell, PointBatch, TerrainGeometryConfig, TerrainResult,
 )
+from .trajectory_corridor import CorridorGrid, TrajectoryCorridor
 
 LOGGER = logging.getLogger(__name__)
 
@@ -35,6 +36,11 @@ class TerrainGeometryEstimator:
         self.last_update_changed = False
         self.last_update_reset_reason: Optional[str] = None
         self.last_reset_reason: Optional[str] = None
+        self._corridor_grid: Optional[CorridorGrid] = None
+        self._corridor_blocked = False
+        self.last_roi_points = 0
+        self.last_corridor_points = 0
+        self.last_fitted_cells = 0
 
     @property
     def cell_count(self) -> int:
@@ -80,15 +86,26 @@ class TerrainGeometryEstimator:
         self._last_timestamp = None
         self._frame_index = 0
         self._fitter.reset()
+        self._corridor_grid = None
+        self._corridor_blocked = False
+        self.last_roi_points = 0
+        self.last_corridor_points = 0
+        self.last_fitted_cells = 0
 
     def update(
         self,
         points_sensor,
         sensor_to_map,
         timestamp_seconds: float,
+        *,
+        corridor: Optional[TrajectoryCorridor] = None,
+        corridor_required: bool = False,
     ) -> TerrainResult:
         self.last_update_changed = False
         self.last_update_reset_reason = None
+        self.last_roi_points = 0
+        self.last_corridor_points = 0
+        self.last_fitted_cells = 0
 
         timestamp = float(timestamp_seconds)
         if not math.isfinite(timestamp):
@@ -105,6 +122,20 @@ class TerrainGeometryEstimator:
         self._last_timestamp = timestamp
 
         pose_matrix = self._validated_pose(sensor_to_map)
+        if corridor_required or corridor is not None or pose_matrix is not None:
+            self._corridor_blocked = corridor_required and corridor is None
+        grid_pose = pose_matrix if pose_matrix is not None else self._last_pose_matrix
+        if corridor is not None and grid_pose is not None:
+            self._corridor_grid = corridor.grid(
+                grid_pose[:2, 3], self.config.radius_m,
+                self.config.cell_size_m, self.config.neighbor_halo_m,
+            )
+        elif pose_matrix is not None:
+            self._corridor_grid = None
+        # A missing TF must never remove the last spatial restriction. Missing
+        # required paths hide cached cells and suspend work until a fresh path.
+        if corridor_required or corridor is not None:
+            self.last_update_changed = True
         if pose_matrix is None:
             self._prune_point_window(timestamp)
             self._prune_ttl(timestamp)
@@ -119,6 +150,11 @@ class TerrainGeometryEstimator:
         ):
             self.clear("pose discontinuity")
         self._last_pose_matrix = pose_matrix.copy()
+        if self._corridor_blocked:
+            self._prune_point_window(timestamp)
+            self._prune_radius(pose_matrix[:3, 3])
+            self._prune_ttl(timestamp)
+            return self._build_update(fit_cycle=False)
 
         self._frame_index += 1
         self._prune_point_window(timestamp)
@@ -445,6 +481,11 @@ class TerrainGeometryEstimator:
         if self.config.max_lateral_m is not None:
             mask &= points_local[:, 1] <= self.config.max_lateral_m
         points = points[mask]
+        self.last_roi_points = len(points)
+        if self._corridor_grid is not None and len(points):
+            world_xy = points @ pose_matrix[:2, :3].T + pose_matrix[:2, 3]
+            points = points[self._corridor_grid.point_mask(world_xy)]
+        self.last_corridor_points = len(points)
 
         if points.shape[0] > self.config.max_ingest_points_per_frame:
             # The flattened ZED cloud preserves image order. Evenly spaced
@@ -597,6 +638,8 @@ class TerrainGeometryEstimator:
         thresholds = self._effective_cell_thresholds()
         eligible = []
         for cell in self._cells.values():
+            if self._corridor_grid is not None and not self._corridor_grid.allows_cell(cell.key):
+                continue
             previous_fit_frame = (
                 -1
                 if cell.last_fit_frame is None
@@ -634,6 +677,7 @@ class TerrainGeometryEstimator:
             )
             cell.last_fit_frame = self._frame_index
             cell.last_fit_timestamp = timestamp
+            self.last_fitted_cells += 1
             self._apply_fit_result(cell, result, timestamp)
             self.last_update_changed = True
 
@@ -962,6 +1006,8 @@ class TerrainGeometryEstimator:
         self,
         rover_position: np.ndarray,
     ) -> list[LocalTerrainCell]:
+        if self._corridor_blocked:
+            return []
         rover_xy = np.asarray(rover_position, dtype=np.float64)[[0, 1]]
         radius_squared = self.config.radius_m * self.config.radius_m
         visible = [
@@ -970,6 +1016,7 @@ class TerrainGeometryEstimator:
             if float(np.sum(np.square(
                 np.asarray(self._fitter.grid_center_xy(cell.key)) - rover_xy
             ))) <= radius_squared
+            and (self._corridor_grid is None or self._corridor_grid.allows_cell(cell.key))
         ]
         visible.sort(key=lambda cell: cell.key)
         return visible

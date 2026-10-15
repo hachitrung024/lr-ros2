@@ -1,6 +1,7 @@
 """Stateful converters independent of ROS executors and publishers."""
 
 from collections import deque
+from copy import deepcopy
 import math
 
 from safety_perception_msgs.msg import (
@@ -11,6 +12,7 @@ from safety_perception_msgs.msg import (
     TrackedObject,
     TrackedObjectArray,
     Trajectory,
+    TrajectoryPath,
     TrajectoryStep,
 )
 
@@ -36,12 +38,15 @@ class TrajectoryConverter:
         frame='map',
         horizon_steps=20,
         path_stride=1,
-        output_dt_sec=0.25,
+        output_dt_sec=0.0,
+        spatial_step_m=1.0,
         min_distance_from_start_m=1.0,
         minimum_cycle_period_sec=0.25,
     ):
         if not 1 <= horizon_steps <= 20 or path_stride < 1:
             raise ValueError('horizon_steps must be 1..20 and path_stride positive')
+        if not math.isfinite(spatial_step_m) or spatial_step_m <= 0:
+            raise ValueError('spatial_step_m must be finite and positive')
         if not frame or not all(
             math.isfinite(v) and v >= 0
             for v in (output_dt_sec, min_distance_from_start_m, minimum_cycle_period_sec)
@@ -51,20 +56,29 @@ class TrajectoryConverter:
         self.horizon = horizon_steps
         self.stride = path_stride
         self.dt_ns = round(output_dt_sec * 1e9)
+        self.spatial_step = spatial_step_m
         self.min_distance = min_distance_from_start_m
         self.period_ns = round(minimum_cycle_period_sec * 1e9)
         self.trajectory_id = 0
         self.last_stamp = None
+        self.path_snapshot = None
+        self._landmarks = []
 
     def reset(self):
         # IDs must not be reused when an SVO is rewound.
         self.last_stamp = None
+        self.path_snapshot = None
+        self._landmarks = []
 
     def convert(self, path):
+        self.path_snapshot = None
         require_frame(path.header, self.frame)
         now = stamp_ns(path.header.stamp)
         if not path.poses or now <= 0:
+            self._landmarks = []
             return None
+        if self.last_stamp is not None and now < self.last_stamp:
+            self.reset()
         if self.last_stamp is not None and 0 <= now - self.last_stamp < self.period_ns:
             return None
         origin = path.poses[0].pose.position
@@ -84,6 +98,7 @@ class TrajectoryConverter:
         poses = path.poses[start:]
         indices = self._indices(poses)
         out = Trajectory(header=path.header)
+        source_indices = []
         for index in indices:
             pose = poses[index]
             if pose.header.frame_id and pose.header.frame_id != self.frame:
@@ -93,14 +108,21 @@ class TrajectoryConverter:
             if not math.isfinite(norm) or norm <= 1e-12:
                 continue
             yaw = yaw_from_quaternion(q.x / norm, q.y / norm, q.z / norm, q.w / norm)
-            if not all(math.isfinite(v) for v in (p.x, p.y, yaw)):
+            if not all(math.isfinite(v) for v in (p.x, p.y, p.z, yaw)):
                 continue
             out.steps.append(TrajectoryStep(step_id=len(out.steps), x=p.x, y=p.y, yaw=yaw))
+            source_indices.append(start + index)
         if not out.steps:
             return None
         self.trajectory_id += 1
         out.trajectory_id = self.trajectory_id
         self.last_stamp = now
+        self.path_snapshot = TrajectoryPath(
+            header=deepcopy(path.header), trajectory_id=out.trajectory_id,
+            poses=deepcopy(path.poses), step_ids=[s.step_id for s in out.steps],
+            source_pose_indices=source_indices,
+        )
+        self._landmarks = [self._landmark_key(path.poses[i]) for i in source_indices]
         return out
 
     def _indices(self, poses):
@@ -120,7 +142,32 @@ class TrajectoryConverter:
             if result[-1] != len(poses) - 1 and len(result) < self.horizon:
                 result.append(len(poses) - 1)
             return result
-        return subsample_indices(len(poses), horizon_steps=self.horizon, stride=self.stride)
+        if self.dt_ns > 0:
+            return subsample_indices(len(poses), horizon_steps=self.horizon, stride=self.stride)
+        return self._spatial_indices(poses)
+
+    @staticmethod
+    def _landmark_key(pose):
+        p = pose.pose.position
+        return stamp_ns(pose.header.stamp), p.x, p.y, p.z
+
+    def _spatial_indices(self, poses):
+        # The last pose is the moving radius intersection. Evaluate interior
+        # landmarks; the complete boundary remains in the reference Path.
+        candidates = list(range(0, max(1, len(poses) - 1), self.stride))
+        lookup = {self._landmark_key(p): i for i, p in enumerate(poses[:-1])}
+        retained = sorted({lookup[key] for key in self._landmarks if key in lookup})
+        arc = [0.]
+        for first, second in zip(poses, poses[1:]):
+            a, b = first.pose.position, second.pose.position
+            arc.append(arc[-1] + math.hypot(b.x - a.x, b.y - a.y))
+        indices = retained[:self.horizon]
+        for index in candidates:
+            if len(indices) >= self.horizon:
+                break
+            if all(abs(arc[index] - arc[other]) >= self.spatial_step - 1e-6 for other in indices):
+                indices.append(index)
+        return sorted(indices)
 
 
 class StateConverter:

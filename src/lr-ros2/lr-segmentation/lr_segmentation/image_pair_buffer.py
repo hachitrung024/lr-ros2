@@ -10,13 +10,15 @@ def stamp_ns(message):
 class ImagePairBuffer:
     """Match nearest available timestamps, consuming each input at most once."""
 
-    def __init__(self, tolerance_ns, max_samples=30, max_age_ns=1_000_000_000):
+    def __init__(self, tolerance_ns, max_samples=30, max_age_ns=1_000_000_000,
+                 future_tolerance_ns=500_000_000):
         """Configure matching tolerance and hard memory/history limits."""
-        if tolerance_ns < 0 or max_samples < 1 or max_age_ns <= 0:
+        if tolerance_ns < 0 or max_samples < 1 or max_age_ns <= 0 or future_tolerance_ns < 0:
             raise ValueError('invalid synchronization buffer limits')
         self.tolerance_ns = tolerance_ns
         self.max_samples = max_samples
         self.max_age_ns = max_age_ns
+        self.future_tolerance_ns = future_tolerance_ns
         self.reset()
 
     def reset(self):
@@ -29,12 +31,19 @@ class ImagePairBuffer:
         self.mask_count = 0
         self.pair_count = 0
         self.dropped_masks = 0
+        self.future_inputs = 0
 
-    def add(self, kind, message):
+    def add(self, kind, message, *, now_ns=None):
         """Retain a sample, expiring old entries in timestamp order."""
         stamp = stamp_ns(message)
         if kind == 'mask':
             self.mask_count += 1
+        # An in-flight inference from before a seek may arrive after reset.
+        # Never let it advance the watermark and evict the new timeline.
+        if now_ns is not None and stamp > now_ns + self.future_tolerance_ns:
+            self.future_inputs += 1
+            self.dropped_masks += int(kind == 'mask')
+            return
         if stamp <= (self.last_mask if kind == 'mask' else self.last_depth):
             return
         self.latest_stamp = stamp if self.latest_stamp is None else max(stamp, self.latest_stamp)

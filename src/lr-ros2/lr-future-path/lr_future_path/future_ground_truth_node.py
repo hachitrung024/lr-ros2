@@ -12,12 +12,7 @@ import numpy as np
 import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
-from rclpy.qos import (
-    HistoryPolicy,
-    QoSProfile,
-    ReliabilityPolicy,
-    qos_profile_sensor_data,
-)
+from rclpy.qos import qos_profile_sensor_data
 
 from .bag_io import (
     load_pose_series,
@@ -26,6 +21,7 @@ from .bag_io import (
 )
 from .cache import cache_is_valid, load_manifest
 from .trajectory import normalize_quaternion, reanchor_pose
+from .path_output import PathOutput
 
 
 class FutureGroundTruthNode(Node):
@@ -55,7 +51,7 @@ class FutureGroundTruthNode(Node):
             self.declare_parameter("step_m", 0.2).value
         )
         horizon_s = float(
-            self.declare_parameter("horizon_s", 20.0).value
+            self.declare_parameter("horizon_s", 0.0).value
         )
         max_gap_s = float(
             self.declare_parameter("max_gap_s", 1.0).value
@@ -71,8 +67,10 @@ class FutureGroundTruthNode(Node):
         if not all(
             math.isfinite(value)
             for value in (self._radius_m, self._step_m, horizon_s)
-        ) or any(value <= 0.0 for value in (self._radius_m, self._step_m, horizon_s)):
-            raise ValueError("radius_m, step_m, and horizon_s must be positive")
+        ) or min(self._radius_m, self._step_m) <= 0.0 or horizon_s < 0.0:
+            raise ValueError(
+                "radius_m and step_m must be positive; horizon_s must be non-negative"
+            )
         if max_gap_s <= 0.0 or alignment_tolerance_s <= 0.0:
             raise ValueError(
                 "max_gap_s and alignment_tolerance_s must be positive"
@@ -95,19 +93,15 @@ class FutureGroundTruthNode(Node):
         else:
             self._series = pose_series
         self._max_gap_ns = int(round(max_gap_s * 1_000_000_000))
-        self._horizon_ns = int(round(horizon_s * 1_000_000_000))
+        self._horizon_ns = int(round(horizon_s * 1_000_000_000)) if horizon_s else None
         self._alignment_tolerance_ns = int(
             round(alignment_tolerance_s * 1_000_000_000)
         )
         self._last_warning_time = 0.0
 
-        output_qos = QoSProfile(
-            history=HistoryPolicy.KEEP_LAST,
-            depth=1,
-            reliability=ReliabilityPolicy.RELIABLE,
-        )
-        self._publisher = self.create_publisher(
-            PathMessage, output_topic, output_qos
+        self._publisher = PathOutput(
+            self, output_topic, radius_m=self._radius_m, step_m=self._step_m,
+            max_points=self._max_points,
         )
         self._subscription = self.create_subscription(
             PoseStamped,
@@ -149,6 +143,11 @@ class FutureGroundTruthNode(Node):
         if current_index is None:
             self._warn_alignment(timestamp)
             return
+        # Keep the upcoming sample even when the nearest-index lookup switches
+        # to it halfway between frames. The anchor itself is interpolated below.
+        current_index = max(0, int(np.searchsorted(
+            self._series.stamps_ns, timestamp, side="right",
+        )) - 1)
         try:
             runtime_position = np.array(
                 [
@@ -172,10 +171,11 @@ class FutureGroundTruthNode(Node):
             indices = self._series.future_indices(
                 current_index,
                 radius_m=self._radius_m,
-                step_m=self._step_m,
+                step_m=min(self._step_m, 0.05),
                 max_gap_ns=self._max_gap_ns,
                 max_points=self._max_points,
                 max_horizon_ns=self._horizon_ns,
+                include_boundary_sample=True,
             )
             message = self._build_path(
                 current,
@@ -184,10 +184,10 @@ class FutureGroundTruthNode(Node):
                 runtime_position,
                 runtime_orientation,
             )
+            self._publisher.publish(message)
         except (IndexError, ValueError) as exception:
             self.get_logger().error(f"Cannot build future path: {exception}")
             return
-        self._publisher.publish(message)
 
     def _build_path(
         self,
@@ -201,8 +201,9 @@ class FutureGroundTruthNode(Node):
         message.header = current.header
         if not message.header.frame_id:
             message.header.frame_id = self._series.frame_id
-        cached_position = self._series.positions[current_index]
-        cached_orientation = self._series.orientations_xyzw[current_index]
+        cached_position, cached_orientation = self._series.interpolated_pose(
+            stamp_to_nanoseconds(current.header.stamp), self._max_gap_ns,
+        )
         for offset, index in enumerate(indices):
             position, orientation = reanchor_pose(
                 cached_position,
@@ -212,6 +213,8 @@ class FutureGroundTruthNode(Node):
                 runtime_position,
                 runtime_orientation,
             )
+            if offset == 0:
+                position, orientation = runtime_position, runtime_orientation
             pose = PoseStamped()
             pose.header.frame_id = message.header.frame_id
             if offset == 0:

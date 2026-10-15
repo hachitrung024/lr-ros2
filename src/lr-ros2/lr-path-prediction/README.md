@@ -25,18 +25,35 @@ ros2 launch lr_path_prediction path_prediction.launch.py \
 | `/lr/mavlink/pose` | `/rover/state`, dynamic only |
 
 The canonical engine publishes `safety_perception_msgs/msg/PredictionOutput`
-on `/predict_output`. This package joins it with `/trajectory` and `/geometry`
+on `/predict_output`. This package joins it with `/trajectory`, `/geometry`
+and `/trajectory/path` (`TrajectoryPath`, full source poses and step-to-source mapping)
 and publishes:
 
 - `/lr/path_prediction/steps` (`diagnostic_msgs/msg/DiagnosticArray`);
 - `/lr/path_prediction/markers` (`visualization_msgs/msg/MarkerArray`);
 - `/lr/path_prediction/reference_path` (`nav_msgs/msg/Path`).
 
-The reference path and markers are emitted only after trajectory, geometry,
-and prediction with the same `trajectory_id` have been joined. They share the
-source trajectory timestamp and exactly the same displayed XYZ positions.
-Terrain elevation is carried in each `GeometryStep`, so presentation never
-mixes a prediction cycle with a newer rolling GridMap.
+The reference path preserves every source pose, including bends and original Z.
+Markers use exactly the source indices mapped to evaluated steps; there is no
+second polyline joining the 20 sparse samples. Terrain elevation remains
+physical evidence and does not replace the path's display height. Labels and
+warning symbols are raised independently. Legacy `marker_z_offset_m` and
+`hide_unknown_terrain` parameters are accepted but no longer change this view.
+
+The visualizer draws the newest complete cycle it can join, retaining its
+source path together with its markers while the evidence is fresh. It never
+replaces the displayed cycle with a smaller trajectory ID. When prediction
+is unavailable, it keeps matching terrain labels/normals and clears unavailable
+collision/rollover evidence. A geometry-only cycle is kept until a newer cycle's
+geometry arrives, avoiding a gray intermediate frame caused by callback order.
+Missing terrain never truncates the source path. Default source-age limits are 1 s for
+prediction and 1.5 s for the base path, configured through
+`visualization.max_prediction_age_sec` and `visualization.max_path_age_sec`.
+Terrain has its own 2 s limit (`visualization.max_geometry_age_sec`), measured
+from the GridMap source stamp. They use ROS time, so pause does not age data.
+Periodic OK diagnostics never invalidate results; warnings identify the affected
+trajectory ID and cannot erase a different fresh completed cycle. All
+presentation/cache state is cleared on rewind.
 
 RViz displays up to 20 future points. A point is gray by default, receives a
 slope label only when terrain is available, and has a terrain-normal arrow when
@@ -47,10 +64,8 @@ the configured safety margin remain raw evidence in `/predict_output`; they do
 not add a warning or change the UI color. Slope labels and colors are preserved
 independently from the collision warning.
 
-By default, RViz stops the visible path at the first step without valid terrain
-instead of drawing that step at z=0. Diagnostics still retain every step and
-report TERRAIN UNKNOWN. Set visualization.hide_unknown_terrain to false in the
-presentation parameters to restore the previous gray-point behavior.
+Unknown terrain remains gray at the source XYZ and diagnostics report
+TERRAIN UNKNOWN. It is not replaced with z=0 or assumed safe.
 
 ## Profiles
 

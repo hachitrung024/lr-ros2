@@ -275,8 +275,8 @@ def test_future_samples_start_now_and_stop_at_gap_radius_and_limit():
     assert samples[-1].position == pytest.approx([1.0, 0.0, 0.0])
 
 
-def test_future_samples_use_along_path_budget_and_time_horizon():
-    """Loops cannot extend a short look-ahead into a long future history."""
+def test_future_samples_use_radius_and_optional_time_horizon():
+    """A turn inside the radius survives; an explicit time cap remains available."""
     trajectory = _identity_trajectory(
         [0, SECOND, 2 * SECOND, 3 * SECOND, 4 * SECOND],
         [
@@ -305,7 +305,9 @@ def test_future_samples_use_along_path_budget_and_time_horizon():
         max_horizon_ns=SECOND,
     )
 
-    assert [sample.stamp_ns for sample in distance_limited] == [1, SECOND, 2 * SECOND]
+    assert [sample.stamp_ns for sample in distance_limited] == [
+        1, SECOND, 2 * SECOND, 3 * SECOND, 4 * SECOND,
+    ]
     assert [sample.stamp_ns for sample in time_limited] == [1, SECOND]
 
 

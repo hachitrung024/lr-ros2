@@ -15,7 +15,9 @@ from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from rclpy.time import Time
-from safety_perception_msgs.msg import GeometryArray, RoverState, TrackedObjectArray, Trajectory
+from safety_perception_msgs.msg import (
+    GeometryArray, RoverState, TrackedObjectArray, Trajectory, TrajectoryPath,
+)
 from tf2_ros import Buffer, TransformException, TransformListener
 from vision_msgs.msg import Detection3DArray
 
@@ -67,7 +69,8 @@ class PredictionBridgeNode(Node):
                 for name, default in (
                     ('horizon_steps', 20),
                     ('path_stride', 1),
-                    ('output_dt_sec', 0.25),
+                    ('output_dt_sec', 0.0),
+                    ('spatial_step_m', 1.0),
                     ('min_distance_from_start_m', 1.0),
                     ('minimum_cycle_period_sec', 0.25),
                 )
@@ -75,6 +78,11 @@ class PredictionBridgeNode(Node):
             self._trajectory_converter = TrajectoryConverter(frame=self._frame, **values)
             self._trajectory_pub = self.create_publisher(
                 Trajectory, self._param('trajectory', 'output_topic', '/trajectory'), reliable
+            )
+            self._path_snapshot_pub = self.create_publisher(
+                TrajectoryPath,
+                self._param('trajectory', 'snapshot_topic', '/trajectory/path'),
+                QoSProfile(depth=20, durability=DurabilityPolicy.TRANSIENT_LOCAL),
             )
             self.create_subscription(
                 Path,
@@ -204,6 +212,7 @@ class PredictionBridgeNode(Node):
         try:
             trajectory = self._trajectory_converter.convert(message)
             if trajectory is not None:
+                self._path_snapshot_pub.publish(self._trajectory_converter.path_snapshot)
                 self._trajectory_pub.publish(trajectory)
                 if 'geometry' in self._roles:
                     self._on_trajectory(trajectory)

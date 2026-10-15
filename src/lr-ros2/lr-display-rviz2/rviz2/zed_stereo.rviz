@@ -153,7 +153,7 @@ Visualization Manager:
         segmentation_footprint_prisms: true
       Topic:
         Depth: 1
-        Durability Policy: Volatile
+        Durability Policy: Transient Local
         Filter size: 1
         History Policy: Keep Last
         Reliability Policy: Reliable
@@ -167,7 +167,6 @@ Visualization Manager:
         collision_warning_outline: true
         collision_warning_symbol: true
         prediction_labels: true
-        prediction_path: true
         prediction_steps: true
         terrain_normals: true
       Topic:
@@ -351,13 +350,13 @@ Visualization Manager:
           Buffer Length: 1
           Class: rviz_default_plugins/Path
           Color: 0; 220; 255
-          Enabled: false
+          Enabled: true
           Head Diameter: 0.30000001192092896
           Head Length: 0.20000000298023224
           Length: 0.30000001192092896
           Line Style: Lines
           Line Width: 0.05000000074505806
-          Name: Raw Future Ground Truth
+          Name: Future Path
           Offset:
             X: 0
             Y: 0
@@ -369,17 +368,17 @@ Visualization Manager:
           Shaft Length: 0.10000000149011612
           Topic:
             Depth: 1
-            Durability Policy: Volatile
+            Durability Policy: Transient Local
             Filter size: 10
             History Policy: Keep Last
             Reliability Policy: Reliable
             Value: /lr/future_path/ground_truth
-          Value: false
+          Value: true
         - Alpha: 1
           Buffer Length: 1
           Class: rviz_default_plugins/Path
           Color: 80; 255; 80
-          Enabled: true
+          Enabled: false
           Head Diameter: 0.30000001192092896
           Head Length: 0.20000000298023224
           Length: 0.30000001192092896
@@ -402,7 +401,7 @@ Visualization Manager:
             History Policy: Keep Last
             Reliability Policy: Reliable
             Value: /lr/path_prediction/reference_path
-          Value: true
+          Value: false
         - Alpha: 1
           Buffer Length: 1
           Class: rviz_default_plugins/Path

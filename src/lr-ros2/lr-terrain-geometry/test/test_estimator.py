@@ -7,6 +7,7 @@ from lr_terrain_geometry import (
     TerrainGeometryConfig,
     TerrainGeometryEstimator,
 )
+from lr_terrain_geometry.trajectory_corridor import TrajectoryCorridor
 
 
 def pose_matrix(x=0.0, y=0.0, z=0.0, yaw_deg=0.0):
@@ -73,6 +74,111 @@ def two_cell_points():
 
 
 class TerrainGeometryEstimatorTests(unittest.TestCase):
+
+    def test_corridor_limits_ingest_fit_and_output_then_explicit_full_roi(self):
+        """Path changes select new cells without fitting or publishing old off-path cells."""
+        terrain = self.make_map(min_accumulation_frames=1, confirmation_good_fits=1)
+        near = plane_points(x_range=(2.05, 2.95), y_range=(.05, .95))
+        far = plane_points(x_range=(2.05, 2.95), y_range=(3.05, 3.95))
+        points = np.vstack((near, far))
+        first = TrajectoryCorridor([[0, .5], [5, .5]], .4)
+        second = TrajectoryCorridor([[0, 3.5], [5, 3.5]], .4)
+        result = terrain.update(points, pose_matrix(), 1., corridor=first)
+        self.assertEqual(terrain.last_roi_points, 200)
+        self.assertEqual(terrain.last_corridor_points, 100)
+        self.assertEqual(terrain.last_fitted_cells, 1)
+        self.assertEqual(len(result.accepted_planes), 1)
+        self.assertEqual(set(terrain._cells), {(2, 0)})
+        first_fit = terrain._cells[(2, 0)].last_fit_timestamp
+
+        result = terrain.update(points, pose_matrix(), 2., corridor=second)
+        self.assertEqual(set(terrain._cells), {(2, 0), (2, 3)})
+        self.assertEqual(terrain.last_fitted_cells, 1)
+        self.assertEqual(terrain._cells[(2, 0)].last_fit_timestamp, first_fit)
+        self.assertEqual(len(result.accepted_planes), 1)
+
+        result = terrain.update(points, pose_matrix(), 3.)
+        self.assertEqual(terrain.last_corridor_points, 200)
+        self.assertEqual(terrain.last_fitted_cells, 2)
+        self.assertEqual(len(result.accepted_planes), 2)
+
+    def test_required_corridor_never_exposes_cache_during_path_or_tf_loss(self):
+        """Unknown paths suspend ingest/fit; TF loss preserves the spatial mask."""
+        terrain = self.make_map(min_accumulation_frames=1, confirmation_good_fits=1)
+        points = np.vstack((
+            plane_points(x_range=(2.05, 2.95), y_range=(.05, .95)),
+            plane_points(x_range=(2.05, 2.95), y_range=(3.05, 3.95)),
+        ))
+        result = terrain.update(points, pose_matrix(), 1.)
+        self.assertEqual(len(result.accepted_planes), 2)
+        corridor = TrajectoryCorridor([[0, .5], [5, .5]], .4)
+        result = terrain.update([], None, 2., corridor=corridor, corridor_required=True)
+        self.assertEqual(len(result.accepted_planes), 1)
+        result = terrain.update([], None, 3.)
+        self.assertEqual(len(result.accepted_planes), 1)  # TF cannot remove the mask.
+        for timestamp, pose in ((4., pose_matrix()), (5., None)):
+            result = terrain.update(points, pose, timestamp, corridor_required=True)
+            self.assertFalse(
+                result.accepted_planes or result.rejected_planes or result.debug_cells,
+            )
+            self.assertTrue(result.display_changed)
+            self.assertEqual(terrain.last_corridor_points, 0)
+            self.assertEqual(terrain.last_fitted_cells, 0)
+            self.assertEqual(terrain.cell_count, 2)  # Keep bounded cache for recovery.
+        result = terrain.update(
+            points, pose_matrix(), 6., corridor=corridor, corridor_required=True,
+        )
+        self.assertEqual(len(result.accepted_planes), 1)
+        result = terrain.update(points, pose_matrix(), 1., corridor_required=True)
+        self.assertEqual(result.reset_reason, 'timestamp moved backwards')
+        self.assertFalse(result.accepted_planes or result.debug_cells)
+        self.assertEqual(terrain.cell_count, 0)
+
+    def test_corridor_uses_world_coordinates_before_sampling_cap(self):
+        """Sensor rotation and a dense off-path cloud cannot consume the point budget."""
+        terrain = self.make_map(max_ingest_points_per_frame=100, fit_every_frames=100)
+        pose = pose_matrix(x=-5, y=4, yaw_deg=90)
+        keep = plane_points(x_range=(-2.95, -2.05), y_range=(4.05, 4.95))
+        discard = plane_points(x_range=(-2.95, -2.05), y_range=(8.05, 8.95), x_count=100)
+        points = camera_points_from_world(np.vstack((keep, discard)), pose)
+        terrain.update(
+            points, pose, 1.,
+            corridor=TrajectoryCorridor([[-5, 4.5], [0, 4.5]], .4),
+        )
+        self.assertEqual(terrain.last_corridor_points, 100)
+        self.assertEqual(set(terrain._cells), {(-3, 4)})
+
+    def test_corridor_clears_on_reset_and_rewind(self):
+        """A new timeline without a path restores the original processing volume."""
+        terrain = self.make_map(fit_every_frames=100)
+        points = plane_points()
+        corridor = TrajectoryCorridor([[0, 10], [3, 10]], .5)
+        terrain.update(points, pose_matrix(), 10., corridor=corridor)
+        self.assertEqual(terrain.cell_count, 0)
+        result = terrain.update(points, pose_matrix(), 1.)
+        self.assertEqual(result.reset_reason, "timestamp moved backwards")
+        self.assertEqual(terrain.cell_count, 1)
+        terrain.reset()
+        self.assertIsNone(terrain._corridor_grid)
+
+    def test_previously_accumulated_off_path_cells_are_not_fitted(self):
+        """An initial full ROI must not leak queued fitting work outside a new path."""
+        terrain = self.make_map(
+            min_accumulation_frames=1, confirmation_good_fits=1, fit_every_frames=2,
+        )
+        points = np.vstack((
+            plane_points(x_range=(2.05, 2.95), y_range=(.05, .95)),
+            plane_points(x_range=(2.05, 2.95), y_range=(3.05, 3.95)),
+        ))
+        terrain.update(points, pose_matrix(), 1.)
+        self.assertEqual(terrain.cell_count, 2)
+        result = terrain.update(
+            points, pose_matrix(), 2.,
+            corridor=TrajectoryCorridor([[0, .5], [5, .5]], .4),
+        )
+        self.assertEqual(terrain.last_fitted_cells, 1)
+        self.assertEqual(len(result.accepted_planes), 1)
+        self.assertIsNone(terrain._cells[(2, 3)].last_fit_frame)
 
     def make_map(self, **overrides):
         values = {

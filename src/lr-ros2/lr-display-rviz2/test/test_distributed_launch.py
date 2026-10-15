@@ -82,7 +82,9 @@ def test_rviz_entry_point_starts_only_rviz_and_uses_remote_clock():
         '-d',
         '/tmp/remote.rviz',
     ]
-    assert rviz.expanded_remapping_rules is None
+    assert rviz.expanded_remapping_rules == [
+        ('/lr/future_path/ground_truth', '/lr/path_prediction/reference_path')
+    ]
 
 
 def test_rviz_entry_point_can_show_rgb_without_segmentation():
@@ -96,6 +98,7 @@ def test_rviz_entry_point_can_show_rgb_without_segmentation():
             'use_sim_time': 'false',
             'svo_mode': 'false',
             'segmentation_enabled': 'false',
+            'prediction_enabled': 'false',
             'rviz_config': '/tmp/remote.rviz',
         }
     )

@@ -1,5 +1,10 @@
 # Landfill Rover ROS 2
 
+To watch Jetson CPU, GPU, memory, temperature, and power while running ROS,
+start the [local performance dashboard](docs/jetson-dashboard.md).
+To measure ROS process CPU/RAM and existing node diagnostics on Jetson, use the
+[node profiling script](docs/jetson-node-profiling.md).
+
 ## Full launch command
 
 This command plays an SVO, selects its matching MAVLink session, publishes the

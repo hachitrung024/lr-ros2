@@ -10,6 +10,12 @@
 | `/lr/mavlink/pose` | `/rover/state`, dynamic profile only |
 
 The standalone and display prediction launches use this consolidated node.
+For each accepted trajectory, the bridge also publishes `/trajectory/path`
+(`safety_perception_msgs/TrajectoryPath`) with an independent copy of the full
+source Path, the same trajectory ID/header, and explicit `step_ids` to
+`source_pose_indices` mapping. This reliable, transient-local topic lets the
+visualizer use exactly the geometry evaluated in that cycle. The canonical
+Trajectory and PredictionOutput message layouts and physics are unchanged.
 `trajectory_adapter_node`, `geometry_adapter_node`,
 `tracked_objects_adapter_node` and `rover_state_adapter_node` remain thin
 compatibility executables using the same converters.
@@ -19,8 +25,17 @@ and unprefixed sections for the compatibility executables. Topic overrides,
 profile, expected frame and `use_sim_time` come from launch arguments. No ROS
 message types or canonical topic defaults have changed.
 
-Trajectory sampling retains the 1 m minimum start distance, 0.25 s minimum
-cycle interval and preference for 0.25 s pose spacing. GridMap history selects
+Trajectory sampling retains the 1 m minimum start distance and 0.25 s minimum
+cycle interval. With `trajectory.output_dt_sec: 0.0`, it retains overlapping
+source landmarks and selects new ones at least `trajectory.spatial_step_m`
+(default 1 m) apart along the path, up to 20 poses. This avoids moving all
+prediction points whenever the view advances or its length changes. The moving
+radius endpoint stays in the full reference Path and is not a prediction
+landmark when interior samples are available. The evaluation budget can limit
+coverage on long winding paths; increase spatial spacing when needed. Display
+extent still uses the complete source path. An explicit positive
+`trajectory.output_dt_sec` enables temporal pose sampling.
+GridMap history selects
 the newest map at or before each trajectory, at most 2 s old by default.
 `GeometryArray.header.stamp` retains the GridMap timestamp; its separate source
 ID/stamp reference the trajectory. Unknown terrain stays unknown.

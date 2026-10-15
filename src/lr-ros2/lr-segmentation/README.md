@@ -74,11 +74,24 @@ Timestamped TF lookup is nonblocking. A matched pair waits up to
 `tf_timeout_sec` (0.2 s by default), with one pending pair and bounded input
 buffers. Later pairs cannot overtake it. Expiry and clock rewind discard the
 pending pair without publishing synthetic free-space evidence.
+Inputs more than 0.5 s ahead of the current ROS clock are discarded before
+they can advance synchronization history. This prevents an inference still
+in flight at seek time from evicting the new timeline's masks and depth.
+Diagnostics count these as `future_inputs_dropped`.
 
 Both nodes report unavailable/stale output on `/diagnostics`.
 `diagnostics.stale_after_sec` defaults to 2 s and uses ROS time, so pausing an
 SVO does not age a successful observation. Box diagnostics also report
 `invalid_pairs`, `unobservable_instances`, and `tf_failures`.
+
+Footprint markers retain last measured map positions for
+`visualization.hold_sec: 0.5` seconds of ROS time through missed detections.
+Retained objects are dimmed and labeled `last seen` after an observation omits
+them. A ROS timer clears expired markers even if input stops; pause freezes
+the hold, and rewind clears it immediately. Marker output is reliable and
+transient-local, so a late RViz subscriber receives the current snapshot.
+This is presentation retention only: measured object topics and collision
+inputs keep their original observation semantics and timestamps.
 
 The implementation separates ROS orchestration (`box_estimator_3d`) from
 geometry (`box_geometry`), tracking (`box_tracking`), image decoding/projection

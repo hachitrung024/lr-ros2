@@ -6,6 +6,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from .path_processing import interpolate_quaternion
+
 
 @dataclass(frozen=True)
 class PoseSeries:
@@ -60,8 +62,9 @@ class PoseSeries:
         max_gap_ns: int,
         max_points: int,
         max_horizon_ns: int | None = None,
+        include_boundary_sample: bool = False,
     ) -> list[int]:
-        """Sample forward within along-path distance and time budgets."""
+        """Sample until the first XY radius exit, with an optional time cap."""
         if radius_m <= 0.0:
             raise ValueError("radius_m must be positive")
         if step_m <= 0.0:
@@ -76,6 +79,8 @@ class PoseSeries:
             raise IndexError("current_index is outside the pose series")
 
         selected = [current_index]
+        if max_points == 1:
+            return selected
         last_selected = current_index
         path_distance = 0.0
         for index in range(current_index + 1, len(self.stamps_ns)):
@@ -96,16 +101,39 @@ class PoseSeries:
                     - self.positions[last_selected, :2]
                 )
             )
+            if np.linalg.norm(
+                self.positions[index, :2] - self.positions[current_index, :2]
+            ) > radius_m or path_distance + distance_from_selected > 2. * radius_m:
+                if include_boundary_sample:
+                    selected.append(index)
+                break
             if distance_from_selected < step_m:
                 continue
-            if path_distance + distance_from_selected > radius_m:
-                break
             selected.append(index)
             last_selected = index
             path_distance += distance_from_selected
             if len(selected) >= max_points:
                 return selected
         return selected
+
+    def interpolated_pose(self, stamp_ns: int, max_gap_ns: int):
+        """Interpolate the cached anchor to avoid snapping at nearest-sample boundaries."""
+        right = int(np.searchsorted(self.stamps_ns, stamp_ns))
+        if right < len(self.stamps_ns) and self.stamps_ns[right] == stamp_ns:
+            return self.positions[right], self.orientations_xyzw[right]
+        if right == 0 or right == len(self.stamps_ns):
+            index = min(right, len(self.stamps_ns) - 1)
+            return self.positions[index], self.orientations_xyzw[index]
+        left = right - 1
+        gap = int(self.stamps_ns[right] - self.stamps_ns[left])
+        if gap > max_gap_ns:
+            raise ValueError("cached anchor lies in a tracking gap")
+        fraction = (stamp_ns - int(self.stamps_ns[left])) / gap
+        return (
+            self.positions[left] + fraction * (self.positions[right] - self.positions[left]),
+            interpolate_quaternion(self.orientations_xyzw[left],
+                                   self.orientations_xyzw[right], fraction),
+        )
 
 
 def normalize_quaternion(quaternion_xyzw: np.ndarray) -> np.ndarray:

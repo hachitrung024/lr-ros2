@@ -149,6 +149,7 @@ class MavlinkTrajectory:
         stationary_speed_mps: float = 0.0,
         max_speed_mps: float = math.inf,
         edge_tolerance_ns: int = NANOSECONDS_PER_SECOND,
+        include_boundary_sample: bool = False,
     ) -> list[PoseSample]:
         """Sample a bounded, noise-resistant future GPS path."""
         if radius_m <= 0.0 or step_m <= 0.0:
@@ -226,10 +227,14 @@ class MavlinkTrajectory:
             distance_from_selected = float(
                 np.linalg.norm(position[:2] - last_selected_position[:2])
             )
-            if distance_from_selected < step_m:
-                continue
-            if path_distance + distance_from_selected > radius_m:
+            outside_radius = np.linalg.norm(position[:2] - current.position[:2]) > radius_m
+            reached_limit = (
+                outside_radius or path_distance + distance_from_selected > 2. * radius_m
+            )
+            if reached_limit and not include_boundary_sample:
                 break
+            if distance_from_selected < step_m and not reached_limit:
+                continue
             orientation = _interpolate_orientation(
                 self.attitude_stamps_ns,
                 self.attitude_orientations_xyzw,
@@ -241,7 +246,7 @@ class MavlinkTrajectory:
             selected.append(PoseSample(sample_stamp, position, orientation))
             last_selected_position = position
             path_distance += distance_from_selected
-            if len(selected) >= max_points:
+            if reached_limit or len(selected) >= max_points:
                 return selected
         return selected
 

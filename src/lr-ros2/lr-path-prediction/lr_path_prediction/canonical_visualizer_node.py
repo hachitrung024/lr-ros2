@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 import time
 
-from diagnostic_msgs.msg import DiagnosticArray
+from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus
 from nav_msgs.msg import Path
 import rclpy
 from rclpy.clock import Clock, ClockType, JumpThreshold
@@ -17,16 +17,17 @@ from safety_perception_msgs.msg import (
     GeometryArray,
     PredictionOutput,
     Trajectory,
+    TrajectoryPath,
 )
 from std_msgs.msg import Header
 from visualization_msgs.msg import Marker, MarkerArray
 
 from lr_terrain_geometry.grid_map_sampling import TerrainSample
 from .presentation import StepPrediction
+from .path_snapshot import stamp_ns, validate_snapshot
 from .outputs import (
     predictions_to_diagnostics,
     predictions_to_markers,
-    predictions_to_reference_path,
 )
 
 
@@ -57,6 +58,21 @@ class CanonicalPredictionVisualizerNode(Node):
         self._prediction_topic = str(
             self.declare_parameter("input.prediction_topic", "/predict_output").value
         )
+        snapshot_topic = str(self.declare_parameter(
+            'input.path_snapshot_topic', '/trajectory/path',
+        ).value)
+        self._max_prediction_age = float(self.declare_parameter(
+            'visualization.max_prediction_age_sec', 1.0,
+        ).value)
+        self._max_path_age = float(self.declare_parameter(
+            'visualization.max_path_age_sec', 1.5,
+        ).value)
+        self._max_geometry_age = float(self.declare_parameter(
+            'visualization.max_geometry_age_sec', 2.0,
+        ).value)
+        if not all(math.isfinite(v) and v > 0 for v in
+                   (self._max_prediction_age, self._max_path_age, self._max_geometry_age)):
+            raise ValueError('Presentation age limits must be finite and positive')
         steps_topic = str(
             self.declare_parameter("output.steps_topic", "/lr/path_prediction/steps").value
         )
@@ -75,12 +91,14 @@ class CanonicalPredictionVisualizerNode(Node):
         self._normal_length_m = float(
             self.declare_parameter("visualization.normal_length_m", 0.8).value
         )
+        # Legacy parameters are accepted for existing YAML files. Source XYZ
+        # and visibility are now shared, so these no longer alter presentation.
         self._marker_z_offset_m = float(
-            self.declare_parameter("visualization.marker_z_offset_m", 0.10).value
+            self.declare_parameter("visualization.marker_z_offset_m", 0.0).value
         )
         self._hide_unknown_terrain = bool(
             self.declare_parameter(
-                "visualization.hide_unknown_terrain", True
+                "visualization.hide_unknown_terrain", False
             ).value
         )
         self._label_height_m = float(
@@ -132,10 +150,20 @@ class CanonicalPredictionVisualizerNode(Node):
             reliable,
         )
         self._predictions = {}
-        self._rendered = {}
+        self._snapshots = {}
+        self._displayed_cycle = -1
+        self._display_key = None
+        self._display_signature = None
+        self._rendered_mask = 0
+        self._invalid_before_ns = -1
+        self._invalid_cycles = {}
         self._prediction_ready = False
         self._trajectories = {}
         self._geometries = {}
+        self._snapshot_subscription = self.create_subscription(
+            TrajectoryPath, snapshot_topic, self._on_path_snapshot,
+            QoSProfile(depth=20, durability=DurabilityPolicy.TRANSIENT_LOCAL),
+        )
         self._last_warning_monotonic = 0.0
         self._status_subscription = self.create_subscription(
             DiagnosticArray, '/prediction/diagnostics', self._on_status, reliable
@@ -218,56 +246,133 @@ class CanonicalPredictionVisualizerNode(Node):
         if message.header.frame_id != self._map_frame:
             self._warn('Prediction frame mismatch')
             return
+        if (stamp_ns(message.header.stamp) <= self._invalid_before_ns
+                or stamp_ns(message.header.stamp) < self._invalid_cycles.get(
+                    int(message.source_trajectory_id), -1,
+                )):
+            return
         self._predictions[int(message.source_trajectory_id)] = message
         self._trim_cache(self._predictions)
-        self._rendered = {
-            key: value for key, value in self._rendered.items() if key in self._predictions
-        }
         self._prediction_ready = True
         self._flush_pending()
 
+    def _on_path_snapshot(self, message: TrajectoryPath) -> None:
+        try:
+            validate_snapshot(message, self._map_frame)
+        except ValueError as error:
+            self._warn(str(error))
+            return
+        self._snapshots[int(message.trajectory_id)] = message
+        self._trim_cache(self._snapshots)
+        self._flush_pending()
+
+    def _now_ns(self):
+        return self.get_clock().now().nanoseconds
+
+    def _fresh(self, snapshot, max_age):
+        age = self._now_ns() - stamp_ns(snapshot.header.stamp)
+        return -200_000_000 <= age <= max_age * 1e9
+
+    def _fresh_geometry(self, cycle):
+        geometry = self._geometries.get(cycle)
+        return geometry if geometry is not None and self._fresh(
+            geometry, self._max_geometry_age,
+        ) else None
+
     def _flush_pending(self) -> None:
-        if not self._prediction_ready or not self._predictions:
+        available = {
+            k for k, snapshot in self._snapshots.items()
+            if k in self._trajectories and k >= self._displayed_cycle
+            and self._fresh(snapshot, self._max_path_age)
+        }
+        complete = {
+            k for k in available if self._prediction_ready
+            and k in self._predictions and k in self._geometries
+            and self._fresh(self._snapshots[k], self._max_prediction_age)
+        }
+        with_geometry = {k for k in available if self._fresh_geometry(k) is not None}
+        if not available:
+            if self._display_key is not None:
+                self._clear_presentation()
             return
-        cycle = max(self._predictions)
-        if cycle not in self._trajectories or cycle not in self._geometries:
-            return
+        # Keep a complete cycle together while it remains fresh. If prediction
+        # is unavailable, the newest source path is still drawn without evidence.
+        cycle = max(complete or with_geometry or available)
+        evaluated = cycle in complete
         requested = int(self._steps_publisher.get_subscription_count() > 0) | (
             int(self._markers_publisher.get_subscription_count() > 0) << 1
         ) | (
             int(self._reference_path_publisher.get_subscription_count() > 0) << 2
         )
-        rendered = self._rendered.get(cycle, 0)
+        key = (cycle, evaluated)
+        signature = (key, id(self._fresh_geometry(cycle)),
+                     id(self._predictions.get(cycle)) if evaluated else None)
+        rendered = self._rendered_mask if signature == self._display_signature else 0
         if requested == 0 or rendered & requested == requested:
             return
-        self._render_prediction(self._predictions[cycle])
-        self._rendered[cycle] = rendered | requested
+        if self._render_cycle(cycle, evaluated):
+            self._displayed_cycle = cycle
+            self._display_key = key
+            self._display_signature = signature
+            self._rendered_mask = rendered | requested
+        else:
+            # A malformed newer cycle must not freeze an old warning on screen.
+            self._snapshots.pop(cycle, None)
+            self._flush_pending()
 
     def _on_status(self, message: DiagnosticArray) -> None:
         for status in message.status:
-            if status.name == 'prediction_node' and status.level != 0:
+            if status.name == 'prediction_node' and status.level != DiagnosticStatus.OK:
+                values = {v.key: v.value for v in status.values}
+                if 'trajectory_id' in values:
+                    try:
+                        cycle = int(values['trajectory_id'])
+                    except ValueError:
+                        continue
+                    # A new cycle waiting for asynchronous inputs does not
+                    # invalidate a different, still-fresh completed cycle.
+                    self._invalid_cycles[cycle] = max(
+                        self._invalid_cycles.get(cycle, -1), stamp_ns(message.header.stamp),
+                    )
+                    self._trim_cache(self._invalid_cycles)
+                    previous = self._predictions.get(cycle)
+                    if previous is not None and stamp_ns(previous.header.stamp) <= (
+                        self._invalid_cycles[cycle]
+                    ):
+                        self._predictions.pop(cycle)
+                    self._flush_pending()
+                    continue
                 if self._predictions:
                     latest = self._predictions[max(self._predictions)].header.stamp
                     stamp = message.header.stamp
                     if (stamp.sec, stamp.nanosec) < (latest.sec, latest.nanosec):
                         return
                 self._prediction_ready = False
-                self._clear_presentation()
+                self._invalid_before_ns = max(
+                    self._invalid_before_ns, stamp_ns(message.header.stamp),
+                )
+                self._predictions.clear()
+                self._flush_pending()
 
-    def _render_prediction(self, message: PredictionOutput) -> None:
-        cycle_id = int(message.source_trajectory_id)
-        trajectory = self._trajectories.get(cycle_id)
-        if trajectory is None:
-            self._warn(f"Prediction cycle {cycle_id} has no cached trajectory")
-            return
-        geometry = self._geometries.get(cycle_id)
-        if message.header.frame_id != self._map_frame:
-            self._warn(
-                f"Prediction frame '{message.header.frame_id}' does not match "
-                f"'{self._map_frame}'"
-            )
-            return
-        predictions = self._join(trajectory, geometry, message)
+    def _render_cycle(self, cycle_id, evaluated):
+        trajectory = self._trajectories[cycle_id]
+        snapshot = self._snapshots[cycle_id]
+        try:
+            mapping = validate_snapshot(snapshot, self._map_frame, trajectory)
+        except ValueError as error:
+            self._warn(str(error))
+            return False
+        # Terrain evidence remains useful when object/depth data is waiting.
+        # It keeps its own source timestamp and expires independently.
+        geometry = self._fresh_geometry(cycle_id)
+        if geometry is not None and (
+            geometry.header.frame_id != self._map_frame
+            or geometry.source_trajectory_stamp != trajectory.header.stamp
+        ):
+            self._warn('Geometry does not match source path timestamp/frame')
+            return False
+        message = self._predictions[cycle_id] if evaluated else PredictionOutput()
+        predictions = self._join(trajectory, geometry, message, snapshot, mapping)
         # Presentation products share the source trajectory timestamp.  The
         # runtime output stamp represents completion time and can lag the raw
         # future path by one or more SVO frames.
@@ -289,30 +394,28 @@ class CanonicalPredictionVisualizerNode(Node):
                     slope_warning_deg=self._slope_warning_deg,
                     slope_critical_deg=self._slope_critical_deg,
                     normal_length_m=self._normal_length_m,
-                    marker_z_offset_m=self._marker_z_offset_m,
+                    marker_z_offset_m=0.0,
                     label_height_m=self._label_height_m,
                     collision_warning_height_m=self._collision_warning_height_m,
                     collision_warning_triangle_size_m=(self._collision_warning_triangle_size_m),
                     collision_warning_line_width_m=(self._collision_warning_line_width_m),
                     collision_warning_symbol_scale_m=(self._collision_warning_symbol_scale_m),
-                    hide_unknown_terrain=self._hide_unknown_terrain,
+                    hide_unknown_terrain=False,
                 )
             )
         if self._reference_path_publisher.get_subscription_count():
             self._reference_path_publisher.publish(
-                predictions_to_reference_path(
-                    predictions,
-                    header,
-                    marker_z_offset_m=self._marker_z_offset_m,
-                    hide_unknown_terrain=self._hide_unknown_terrain,
-                )
+                Path(header=snapshot.header, poses=snapshot.poses)
             )
+        return True
 
     def _join(
         self,
         trajectory: Trajectory,
         geometry: GeometryArray | None,
         output: PredictionOutput,
+        snapshot: TrajectoryPath,
+        mapping: dict,
     ) -> list[StepPrediction]:
         geometry_by_id = {
             int(item.step_id): item for item in ([] if geometry is None else geometry.steps)
@@ -320,13 +423,14 @@ class CanonicalPredictionVisualizerNode(Node):
         rollover_by_id = {int(item.step_id): item for item in output.rollover_steps}
         collision_by_id = {int(item.step_id): item for item in output.collision_steps}
         predictions = []
-        distance = 0.0
-        previous_xy = None
+        distances = [0.0]
+        for first, second in zip(snapshot.poses, snapshot.poses[1:]):
+            a, b = first.pose.position, second.pose.position
+            distances.append(distances[-1] + math.hypot(b.x - a.x, b.y - a.y))
         for step_index, step in enumerate(trajectory.steps, start=1):
-            xy = (float(step.x), float(step.y))
-            if previous_xy is not None:
-                distance += math.hypot(xy[0] - previous_xy[0], xy[1] - previous_xy[1])
-            previous_xy = xy
+            source_index = mapping[step.step_id]
+            source_pose = snapshot.poses[source_index]
+            position = source_pose.pose.position
             terrain = self._terrain_for_step(geometry_by_id.get(int(step.step_id)))
             collision = collision_by_id.get(int(step.step_id))
             candidates = [] if collision is None else collision.collision_objects
@@ -339,16 +443,16 @@ class CanonicalPredictionVisualizerNode(Node):
                 if not candidates
                 else min(float(item.min_distance_m) for item in candidates)
             )
-            elevation = terrain.elevation_m if terrain.valid else 0.0
             predictions.append(
                 StepPrediction(
                     step_index=step_index,
-                    source_pose_index=int(step.step_id),
-                    position_xyz=(xy[0], xy[1], elevation),
-                    distance_from_start_m=distance,
-                    time_from_start_sec=math.nan,
+                    source_pose_index=source_index,
+                    position_xyz=(position.x, position.y, position.z),
+                    distance_from_start_m=distances[source_index],
+                    time_from_start_sec=(stamp_ns(source_pose.header.stamp)
+                                         - stamp_ns(snapshot.header.stamp)) / 1e9,
                     terrain=terrain,
-                    object_data_available=True,
+                    object_data_available=collision is not None,
                     object_collision=bool(objects),
                     object_ids=tuple(str(item.track_id) for item in objects),
                     nearest_object_clearance_m=clearance,
@@ -433,18 +537,24 @@ class CanonicalPredictionVisualizerNode(Node):
 
     @staticmethod
     def _trim_cache(cache) -> None:
-        while len(cache) > 20:
+        while len(cache) > 64:
             del cache[next(iter(cache))]
 
     def _on_time_jump(self, _time_jump) -> None:
         self._predictions.clear()
-        self._rendered.clear()
+        self._snapshots.clear()
+        self._displayed_cycle = -1
+        self._invalid_before_ns = -1
+        self._invalid_cycles.clear()
         self._prediction_ready = False
         self._trajectories.clear()
         self._geometries.clear()
         self._clear_presentation()
 
     def _clear_presentation(self):
+        self._display_key = None
+        self._display_signature = None
+        self._rendered_mask = 0
         header = Header(
             stamp=self.get_clock().now().to_msg(),
             frame_id=self._map_frame,

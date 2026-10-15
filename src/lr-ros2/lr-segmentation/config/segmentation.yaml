@@ -40,6 +40,7 @@ box_estimator_3d:
     footprint.minimum_thickness_m: 0.04
     footprint.minimum_height_m: 0.10
     visualization.show_boxes: false
+    visualization.hold_sec: 0.5
     visualization.box_line_width_m: 0.07
     visualization.box_fill_alpha: 0.12
     visualization.label_scale_m: 0.28

@@ -71,7 +71,6 @@ def test_markers_include_points_slope_label_and_normal():
     assert message.markers[0].action == Marker.DELETEALL
     namespaces = {marker.ns for marker in message.markers[1:]}
     assert namespaces == {
-        "prediction_path",
         "prediction_steps",
         "prediction_labels",
         "terrain_normals",
@@ -82,8 +81,8 @@ def test_markers_include_points_slope_label_and_normal():
     assert label.color.g == 0.55
     assert label.color.b == 0.55
     normal = next(marker for marker in message.markers if marker.ns == "terrain_normals")
-    assert normal.points[0].z == 0.4
-    assert math.isclose(normal.points[1].z, 1.2)
+    assert normal.points[0].z == 3.1
+    assert math.isclose(normal.points[1].z, 3.9)
 
 
 def test_reference_path_uses_exact_marker_positions_and_yaw():
@@ -110,7 +109,7 @@ def test_reference_path_uses_exact_marker_positions_and_yaw():
     assert path.poses[0].pose.orientation.w == 1.0
 
 
-def test_unknown_terrain_hides_that_step_and_the_remaining_horizon():
+def test_unknown_terrain_preserves_that_step_and_the_remaining_horizon():
     predictions = [
         _prediction(step_index=1, x_value=1.0),
         _prediction(step_index=2, x_value=2.0, terrain_valid=False),
@@ -140,8 +139,8 @@ def test_unknown_terrain_hides_that_step_and_the_remaining_horizon():
     points = next(
         marker for marker in markers.markers if marker.ns == "prediction_steps"
     )
-    assert [point.x for point in points.points] == [1.0]
-    assert [pose.pose.position.x for pose in path.poses] == [1.0]
+    assert [point.x for point in points.points] == [1.0, 2.0, 3.0]
+    assert [pose.pose.position.x for pose in path.poses] == [1.0, 2.0, 3.0]
     assert len(diagnostics.status) == 3
     assert diagnostics.status[1].message == "TERRAIN UNKNOWN"
 

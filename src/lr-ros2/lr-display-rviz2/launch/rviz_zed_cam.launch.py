@@ -69,6 +69,11 @@ def launch_setup(context, *args, **kwargs):
         )
 
     remappings = []
+    if camera_type == 'stereo' and (
+        LaunchConfiguration('prediction_enabled', default='true').perform(context).lower()
+        == 'true'
+    ):
+        remappings.append(('/lr/future_path/ground_truth', '/lr/path_prediction/reference_path'))
     if camera_type == 'stereo' and not segmentation_enabled:
         remappings.append(
             ('/segmentation/overlay', f'/{camera_name}/zed_node/rgb/color/rect/image')
@@ -132,6 +137,10 @@ def generate_launch_description():
                 'rviz_config',
                 default_value='',
                 description='Optional RViz config path on this UI host.',
+            ),
+            DeclareLaunchArgument(
+                'prediction_enabled', default_value='true', choices=['true', 'false'],
+                description='Show the path matched to prediction; false shows raw future path.',
             ),
             OpaqueFunction(function=launch_setup),
         ]

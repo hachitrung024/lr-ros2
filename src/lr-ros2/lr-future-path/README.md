@@ -10,11 +10,34 @@ records ZED map poses into a rosbag2 directory. Later launches load that cache
 and publish a bounded look-ahead nav_msgs/msg/Path on
 /lr/future_path/ground_truth.
 
-The default path budget is 15 m of cumulative XY travel and 20 seconds. Points
-are emitted only after moving 0.2 m from the last emitted point, rather than by
-accumulating every sub-threshold position fluctuation. A route that turns back
-or loops therefore still consumes the 15 m budget instead of remaining inside
-an unbounded 15 m radius.
+The default display extent is a 15 m XY radius around the current pose. The
+path stops at its first exit, with an interpolated boundary endpoint; it does
+not re-enter the circle from later in the recording. There is no time cutoff
+by default (`horizon_s: 0`), so slow motion and long stops do not shorten the
+look-ahead. An explicit positive `horizon_s` restores an optional time cap.
+For loops contained inside the circle, a secondary spatial limit of twice the
+radius bounds the displayed route. Real gaps and the end of a recording can
+still shorten it; no trajectory is fabricated across missing data.
+
+Both GPS and VIO sources sample new route sections at approximately 0.2 m,
+with at most 256 output poses. Bounded local linear smoothing uses a 0.8 m
+spatial window and moves each sample by at most 0.2 m. It preserves the current
+anchor and endpoint, recorded/interpolated timestamps and attitudes.
+Interior landmarks keep their map coordinates and source timestamps while the
+view advances. New landmarks enter at the front; existing ones are not
+redistributed when the visible length changes. Retention is validated against
+the current raw route within `smoothing_max_deviation_m`; larger route
+corrections, rewinds and frame changes discard old landmarks. This is a processed reference trajectory,
+not the original unsmoothed samples. The same processed path feeds terrain and
+prediction; pose/TF localization outputs are unchanged. Set
+`smoothing_window_m: 0` to disable smoothing.
+
+Output uses reliable transient-local QoS with depth one, so RViz can attach
+while replay is paused. It retains the last path for `display_hold_s: 1.5`
+seconds of ROS time through input gaps or transient one-point paths, without
+republishing it as fresh data.
+Longer gaps publish an empty path; backward ROS time changes clear retained
+data immediately. A paused ROS clock does not expire the displayed path.
 
 By default caches live beside the SVO:
 

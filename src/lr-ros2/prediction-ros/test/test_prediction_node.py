@@ -88,3 +88,13 @@ def test_rewind_discards_cached_empty_objects_and_acceleration(node):
     node._objects_callback(TrackedObjectArray(header=header(5)))
     node._state_callback(RoverState(header=header(5), acceleration_valid=True))
     assert len(node.outputs) == 2
+
+
+def test_diagnostics_identify_the_waiting_cycle(node):
+    messages = []
+    node._diagnostics = SimpleNamespace(publish=messages.append)
+    trajectory, _ = inputs(cycle=42)
+    node._trajectory_callback(trajectory)
+    node._publish_diagnostics()
+    values = {v.key: v.value for v in messages[-1].status[0].values}
+    assert values['trajectory_id'] == '42'

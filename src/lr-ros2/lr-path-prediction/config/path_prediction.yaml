@@ -1,6 +1,7 @@
 canonical_prediction_visualizer:
   ros__parameters:
     input.trajectory_topic: /trajectory
+    input.path_snapshot_topic: /trajectory/path
     input.geometry_topic: /geometry
     input.prediction_topic: /predict_output
     output.steps_topic: /lr/path_prediction/steps
@@ -10,8 +11,9 @@ canonical_prediction_visualizer:
     warning.slope_deg: 20.0
     critical.slope_deg: 30.0
     visualization.normal_length_m: 0.8
-    visualization.marker_z_offset_m: 0.10
-    visualization.hide_unknown_terrain: true
+    visualization.max_prediction_age_sec: 1.0
+    visualization.max_path_age_sec: 1.5
+    visualization.max_geometry_age_sec: 2.0
     visualization.label_height_m: 0.45
     visualization.collision_warning_height_m: 1.0
     visualization.collision_warning_triangle_size_m: 0.9

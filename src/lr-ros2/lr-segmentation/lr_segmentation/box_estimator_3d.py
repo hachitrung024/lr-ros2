@@ -25,9 +25,10 @@ from .box_geometry import (
     BoxMeasurement, _box_footprint_xy, _quaternion_to_matrix, _require_positive,
     _robust_z_limits, _unit_vector, fit_oriented_box, fit_projected_footprint,
 )
-from .box_outputs import _detection_array, _marker_array, _tracked_object_array
+from .box_outputs import _detection_array, _tracked_object_array
 from .box_geometry import TrackedBox as TrackedBox  # Historical public import.
 from .box_tracking import BoxTracker
+from .box_display import BoxDisplayBuffer
 from .depth_sampling import (
     depth_message_to_meters, instance_mask_message_to_labels, instance_point_clouds,
 )
@@ -215,12 +216,16 @@ class BoxEstimator3DNode(Node):
         )
         marker_qos = QoSProfile(depth=1)
         marker_qos.reliability = ReliabilityPolicy.RELIABLE
-        marker_qos.durability = DurabilityPolicy.VOLATILE
+        marker_qos.durability = DurabilityPolicy.TRANSIENT_LOCAL
         self._marker_publisher = self.create_publisher(
             MarkerArray,
             str(self._marker_topic),
             marker_qos,
         )
+        self._box_display = BoxDisplayBuffer(float(self.declare_parameter(
+            "visualization.hold_sec", 0.5,
+        ).value))
+        self._display_timer = self.create_timer(0.1, self._publish_box_display)
         self._mask_subscription = self.create_subscription(
             Image,
             str(self._mask_topic),
@@ -368,11 +373,11 @@ class BoxEstimator3DNode(Node):
         self._up_axis = _unit_vector(self._up_axis, "geometry.up_axis")
 
     def _on_mask(self, message: Image) -> None:
-        self._pairs.add("mask", message)
+        self._pairs.add("mask", message, now_ns=self.get_clock().now().nanoseconds)
         self._try_estimate()
 
     def _on_depth(self, message: Image) -> None:
-        self._pairs.add("depth", message)
+        self._pairs.add("depth", message, now_ns=self.get_clock().now().nanoseconds)
         self._try_estimate()
 
     def _on_camera_info(self, message: CameraInfo) -> None:
@@ -383,6 +388,7 @@ class BoxEstimator3DNode(Node):
         """Reset state after SVO seek or a ROS time-source change."""
         self._pairs.reset()
         self._tracker.reset()
+        self._box_display.reset()
         self._published_boxes = 0
         self._tf_failures = 0
         self._processing_ms = 0.0
@@ -485,19 +491,22 @@ class BoxEstimator3DNode(Node):
             )
         elif len(tracked_boxes) != len(measurements):
             self._last_error = "Partial observation: some objects await confirmation"
-        if self._marker_publisher.get_subscription_count():
-            self._marker_publisher.publish(
-                _marker_array(
-                    header,
-                    tracked_boxes,
-                    line_width_m=self._box_marker_line_width_m,
-                    fill_alpha=self._box_marker_fill_alpha,
-                    label_scale_m=self._box_marker_label_scale_m,
-                    footprint_z_offset_m=self._footprint_marker_z_offset_m,
-                    prism_fill_alpha=self._footprint_prism_fill_alpha,
-                    show_boxes=self._show_box_markers,
-                )
-            )
+        now_ns = self.get_clock().now().nanoseconds
+        self._box_display.update(tracked_boxes, header, now_ns)
+        self._publish_box_display(now_ns)
+
+    def _publish_box_display(self, now_ns=None):
+        markers = self._box_display.markers(
+            self.get_clock().now().nanoseconds if now_ns is None else now_ns,
+            line_width_m=self._box_marker_line_width_m,
+            fill_alpha=self._box_marker_fill_alpha,
+            label_scale_m=self._box_marker_label_scale_m,
+            footprint_z_offset_m=self._footprint_marker_z_offset_m,
+            prism_fill_alpha=self._footprint_prism_fill_alpha,
+            show_boxes=self._show_box_markers,
+        )
+        if markers is not None:
+            self._marker_publisher.publish(markers)
 
     def _publish_diagnostics(self) -> None:
         now = self.get_clock().now()
@@ -521,6 +530,7 @@ class BoxEstimator3DNode(Node):
                         "masks_received": self._pairs.mask_count,
                         "matched_pairs": self._pairs.pair_count,
                         "dropped_masks": self._pairs.dropped_masks,
+                        "future_inputs_dropped": self._pairs.future_inputs,
                         "boxes_published": self._published_boxes,
                         "tf_failures": self._tf_failures,
                         "invalid_pairs": self._invalid_pairs,

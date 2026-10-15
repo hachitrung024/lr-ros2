@@ -483,3 +483,19 @@ def test_tf_expiry_and_rewind_discard_pending_pairs(capturing_box_node):
     node._on_time_jump(None)
     assert node._pending_pair is None
     assert not node.observations
+
+
+def test_clock_guard_rejects_inflight_old_mask_after_seek(capturing_box_node):
+    from rclpy.time import Time as RosTime
+    node = capturing_box_node
+    node.set_parameters([Parameter('use_sim_time', value=True)])
+    node.get_clock().set_ros_time_override(RosTime(seconds=10))
+    node._camera_info = None
+    old = Header(frame_id='camera_optical', stamp=Time(sec=50))
+    node._on_mask(labels_to_image_message(np.zeros((2, 2), dtype=np.uint16), old))
+    assert node._pairs.future_inputs == 1
+    assert node._pairs.latest_stamp is None
+    current = Header(frame_id='camera_optical', stamp=Time(sec=10))
+    node._on_mask(labels_to_image_message(np.zeros((2, 2), dtype=np.uint16), current))
+    node._on_depth(depth_message(np.ones((2, 2)), current))
+    assert node._pairs.pop_pair() is not None

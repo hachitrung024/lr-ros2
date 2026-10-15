@@ -84,10 +84,10 @@ def test_node_publishes_reanchored_future_path(ros_context):
         path = received[-1]
         assert path.header.frame_id == "map"
         assert [pose.pose.position.x for pose in path.poses] == pytest.approx(
-            [5.0, 6.0, 7.0]
+            np.linspace(5.0, 7.0, 11)
         )
         assert [pose.pose.position.y for pose in path.poses] == pytest.approx(
-            [3.0, 3.0, 3.0]
+            [3.0] * 11
         )
         assert path.poses[0].header.stamp.sec == 10
         assert path.poses[-1].header.stamp.sec == 12

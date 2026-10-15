@@ -11,6 +11,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/Point2D.msg"
   "msg/TrajectoryStep.msg"
   "msg/Trajectory.msg"
+  "msg/TrajectoryPath.msg"
   "msg/GeometryStep.msg"
   "msg/GeometryArray.msg"
   "msg/TrackedObject.msg"

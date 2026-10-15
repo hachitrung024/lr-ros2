@@ -36,8 +36,8 @@ def test_nearest_index_honors_tolerance_and_skipped_frames():
     assert series.nearest_index(3_000, 1_000) == 1
 
 
-def test_future_sampling_stops_at_along_path_distance_budget():
-    """A route that returns toward its origin cannot exceed the budget."""
+def test_future_sampling_stops_at_first_radius_exit():
+    """Do not re-enter the display circle after the route first leaves it."""
     series = _series(
         [0, 1, 2, 3, 4, 5],
         [

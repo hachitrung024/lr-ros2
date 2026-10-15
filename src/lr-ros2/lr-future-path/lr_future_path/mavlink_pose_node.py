@@ -32,6 +32,7 @@ from .mavlink import (
     load_trajectory,
     select_session,
 )
+from .path_output import PathOutput
 
 
 class MavlinkPoseNode(Node):
@@ -89,7 +90,7 @@ class MavlinkPoseNode(Node):
             self.declare_parameter("step_m", 0.2).value
         )
         horizon_s = float(
-            self.declare_parameter("horizon_s", 20.0).value
+            self.declare_parameter("horizon_s", 0.0).value
         )
         self._stationary_speed_mps = float(
             self.declare_parameter("stationary_speed_mps", 0.1).value
@@ -116,8 +117,10 @@ class MavlinkPoseNode(Node):
         if not all(
             math.isfinite(value)
             for value in (self._radius_m, self._step_m, horizon_s)
-        ) or any(value <= 0.0 for value in (self._radius_m, self._step_m, horizon_s)):
-            raise ValueError("radius_m, step_m, and horizon_s must be positive")
+        ) or min(self._radius_m, self._step_m) <= 0.0 or horizon_s < 0.0:
+            raise ValueError(
+                "radius_m and step_m must be positive; horizon_s must be non-negative"
+            )
         if (
             not math.isfinite(self._stationary_speed_mps)
             or not math.isfinite(self._max_speed_mps)
@@ -141,7 +144,7 @@ class MavlinkPoseNode(Node):
         self._max_gps_gap_ns = int(
             round(max_gps_gap_s * 1_000_000_000)
         )
-        self._horizon_ns = int(round(horizon_s * 1_000_000_000))
+        self._horizon_ns = int(round(horizon_s * 1_000_000_000)) if horizon_s else None
         self._edge_tolerance_ns = 1_000_000_000
         self._session_selector = session_selector
         self._trajectory_loader = trajectory_loader
@@ -163,7 +166,8 @@ class MavlinkPoseNode(Node):
             PoseStamped, pose_topic, output_qos
         )
         self._future_publisher = (
-            self.create_publisher(PathMessage, future_topic, output_qos)
+            PathOutput(self, future_topic, radius_m=self._radius_m, step_m=self._step_m,
+                       max_points=self._max_points)
             if self._future_enabled
             else None
         )
@@ -266,13 +270,14 @@ class MavlinkPoseNode(Node):
             samples = self._trajectory.future_samples(
                 stamp_ns,
                 radius_m=self._radius_m,
-                step_m=self._step_m,
+                step_m=min(self._step_m, 0.05),
                 max_gps_gap_ns=self._max_gps_gap_ns,
                 max_points=self._max_points,
                 max_horizon_ns=self._horizon_ns,
                 stationary_speed_mps=self._stationary_speed_mps,
                 max_speed_mps=self._max_speed_mps,
                 edge_tolerance_ns=self._edge_tolerance_ns,
+                include_boundary_sample=True,
             )
             if samples:
                 self._future_publisher.publish(

@@ -136,7 +136,7 @@ def predictions_to_markers(
     collision_warning_triangle_size_m: float = 0.9,
     collision_warning_line_width_m: float = 0.08,
     collision_warning_symbol_scale_m: float = 0.60,
-    hide_unknown_terrain: bool = True,
+    hide_unknown_terrain: bool = False,
 ) -> MarkerArray:
     """Build path points, slope UI, one collision warning, and normals."""
     output = MarkerArray()
@@ -150,8 +150,6 @@ def predictions_to_markers(
     if not visible_predictions:
         return output
 
-    line = _base_marker(header, "prediction_path", 0, Marker.LINE_STRIP)
-    line.scale.x = 0.06
     points = _base_marker(header, "prediction_steps", 0, Marker.SPHERE_LIST)
     points.scale.x = 0.22
     points.scale.y = 0.22
@@ -172,8 +170,6 @@ def predictions_to_markers(
             slope_critical_deg,
         )
         position = _display_position(prediction, marker_z_offset_m)
-        line.points.append(position)
-        line.colors.append(point_color)
         points.points.append(position)
         points.colors.append(point_color)
 
@@ -193,7 +189,7 @@ def predictions_to_markers(
             label.text = label_text
             output.markers.append(label)
 
-        if prediction.terrain.normal_xyz is not None:
+        if prediction.terrain.valid and prediction.terrain.normal_xyz is not None:
             normal = prediction.terrain.normal_xyz
             arrow = _base_marker(
                 header,
@@ -227,8 +223,7 @@ def predictions_to_markers(
             symbol_scale_m=collision_warning_symbol_scale_m,
         )
 
-    output.markers.insert(1, line)
-    output.markers.insert(2, points)
+    output.markers.insert(1, points)
     return output
 
 
@@ -237,7 +232,7 @@ def predictions_to_reference_path(
     header: Header,
     *,
     marker_z_offset_m: float,
-    hide_unknown_terrain: bool = True,
+    hide_unknown_terrain: bool = False,
 ) -> Path:
     """Build the exact cycle-matched path used by prediction markers."""
     message = Path(header=header)
@@ -412,13 +407,10 @@ def _display_position(
     prediction: StepPrediction,
     marker_z_offset_m: float,
 ) -> Point:
-    z_value = (
-        prediction.terrain.elevation_m if prediction.terrain.valid else prediction.position_xyz[2]
-    )
     return Point(
         x=prediction.position_xyz[0],
         y=prediction.position_xyz[1],
-        z=z_value + marker_z_offset_m,
+        z=prediction.position_xyz[2] + marker_z_offset_m,
     )
 
 

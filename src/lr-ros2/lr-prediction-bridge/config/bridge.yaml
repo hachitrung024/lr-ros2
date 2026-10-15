@@ -4,9 +4,11 @@ prediction_bridge_node:
     expected_frame_id: map
     trajectory.input_topic: /lr/future_path/ground_truth
     trajectory.output_topic: /trajectory
+    trajectory.snapshot_topic: /trajectory/path
     trajectory.horizon_steps: 20
     trajectory.path_stride: 1
-    trajectory.output_dt_sec: 0.25
+    trajectory.output_dt_sec: 0.0
+    trajectory.spatial_step_m: 1.0
     trajectory.min_distance_from_start_m: 1.0
     trajectory.minimum_cycle_period_sec: 0.25
     geometry.grid_map_topic: /terrain_geometry/grid_map
@@ -27,11 +29,13 @@ trajectory_adapter_node:
   ros__parameters:
     input_topic: /lr/future_path/ground_truth
     output_topic: /trajectory
+    snapshot_topic: /trajectory/path
     expected_frame_id: map
     force_frame_id_map: false
     horizon_steps: 20
     path_stride: 1
-    output_dt_sec: 0.25
+    output_dt_sec: 0.0
+    spatial_step_m: 1.0
     min_distance_from_start_m: 1.0
     minimum_cycle_period_sec: 0.25
 

@@ -79,6 +79,78 @@ def test_sampling_throttle_and_monotonic_ids_after_seek():
         converter.convert(bad)
 
 
+def test_snapshot_keeps_dense_xyz_and_exact_mapping_after_sampling():
+    source = path()
+    for i, p in enumerate(source.poses):
+        p.pose.position.y = math.sin(i / 3.)
+        p.pose.position.z = 1.7 + i * .01
+    converter = TrajectoryConverter(horizon_steps=5)
+    trajectory = converter.convert(source)
+    snapshot = converter.path_snapshot
+    assert snapshot.header == trajectory.header
+    assert snapshot.trajectory_id == trajectory.trajectory_id
+    assert len(snapshot.poses) == len(source.poses)
+    assert snapshot.source_pose_indices[0] > 0
+    for step, step_id, index in zip(
+        trajectory.steps, snapshot.step_ids, snapshot.source_pose_indices,
+    ):
+        p = snapshot.poses[index].pose.position
+        assert step_id == step.step_id
+        assert (step.x, step.y) == (p.x, p.y)
+        assert p.z == source.poses[index].pose.position.z
+    source.poses[1].pose.position.z = -100.
+    assert snapshot.poses[1].pose.position.z > 0
+    assert converter.convert(source) is None
+    assert converter.path_snapshot is None
+    converter.reset()
+    assert converter.path_snapshot is None
+
+
+def test_default_sampling_spans_radius_regardless_of_pose_timing():
+    slow = path()
+    fast = path()
+    for index, pose_message in enumerate(fast.poses):
+        pose_message.header.stamp.sec = 10
+        pose_message.header.stamp.nanosec = index * 10_000_000
+    first = TrajectoryConverter().convert(slow)
+    second = TrajectoryConverter().convert(fast)
+    assert [(s.x, s.y) for s in first.steps] == [(s.x, s.y) for s in second.steps]
+    assert first.steps[-1].x == 20.0  # The full moving endpoint stays in the Path.
+
+
+def test_spatial_prediction_retains_landmarks_as_the_view_advances_and_extends():
+    converter = TrajectoryConverter(minimum_cycle_period_sec=0.)
+
+    def view(start, end, second):
+        message = Path(header=pose(second).header)
+        locations = [start] + [i / 5. for i in range(100) if start < i / 5. < end] + [end]
+        for x in locations:
+            p = pose(10, x)
+            stamp = round((10. + x) * 1e9)
+            p.header.stamp.sec, p.header.stamp.nanosec = divmod(stamp, 10 ** 9)
+            message.poses.append(p)
+        return message
+
+    previous = converter.convert(view(0., 10.13, 10))
+    assert [s.x for s in previous.steps] == list(range(1, 10)) + [10.]
+    for start, end, second in ((.13, 10.43, 11), (.73, 11.23, 12), (1.13, 12.13, 13)):
+        source = view(start, end, second)
+        current = converter.convert(source)
+        old_visible = {s.x for s in previous.steps if s.x - start >= 1. and s.x < end}
+        positions = {s.x for s in current.steps}
+        assert old_visible <= positions
+        assert all(x == round(x) for x in positions)
+        assert end not in positions
+        snapshot = converter.path_snapshot
+        for step, index in zip(current.steps, snapshot.source_pose_indices):
+            assert step.x == source.poses[index].pose.position.x
+        previous = current
+    # New timelines cannot retain landmarks or throttle from the old window.
+    rewound = converter.convert(view(0., 10.13, 5))
+    assert rewound.steps[0].x == 1.
+    assert rewound.trajectory_id > previous.trajectory_id
+
+
 def test_state_acceleration_missing_zero_gaps_and_rewind():
     converter = StateConverter()
     first = converter.convert(pose(1, 0.5))
