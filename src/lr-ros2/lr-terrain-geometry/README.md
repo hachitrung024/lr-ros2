@@ -13,6 +13,36 @@ exposes the `~/reset` service. The heatmap is an `rgb8` image intended for an
 RViz Image dock. Processing parameters are read-only after startup and are
 configured in `config/terrain_geometry.yaml`.
 
+The default launch limits OpenBLAS to one thread for this node, reducing CPU
+contention on Jetson while leaving the other backend processes unchanged.
+Set `TERRAIN_OPENBLAS_NUM_THREADS` before launching to override it. This applies
+before NumPy loads; a direct `ros2 run` instead needs `OPENBLAS_NUM_THREADS=1`.
+The YAML uses a three-cloud fit cadence, 800 central / 150 neighboring fit
+points, 100 RANSAC hypotheses and two refinement iterations. Accumulation,
+confirmation and plane-quality thresholds still apply independently.
+
+`tools/benchmark_latency.py` runs the headless pipeline with an instrumented
+terrain node. Do not run it alongside an existing backend. It records callback
+and stage times, resource samples, accepted planes and first-accept delays.
+For example, after sourcing the workspace on Jetson:
+
+```bash
+export ROS_DOMAIN_ID=42 ROS_LOCALHOST_ONLY=0
+python3 src/lr-ros2/lr-terrain-geometry/tools/benchmark_latency.py \
+  --config src/lr-ros2/lr-terrain-geometry/config/terrain_geometry.yaml \
+  --output /tmp/terrain-live --capture /tmp/terrain-inputs.pkl --blas-threads 1
+python3 src/lr-ros2/lr-terrain-geometry/tools/benchmark_latency.py \
+  --config src/lr-ros2/lr-terrain-geometry/config/terrain_geometry.yaml \
+  --output /tmp/terrain-replay --replay /tmp/terrain-inputs.pkl --blas-threads 1
+```
+
+Capture stores points after ROI, corridor and frame-cap filtering. Replay is
+for comparing fitting/accumulation settings on identical input; it excludes
+DDS, TF lookup, cloud decoding and ROI filtering, and cannot evaluate input
+resolution or ingestion-cap changes. Only load pickle captures from trusted
+benchmark runs. Live `sim_age_ms` uses the replay clock and is not sensor-to-UI
+wall latency. Marker/heatmap costs apply only when those outputs have subscribers.
+
 `estimator.py` owns rolling cells and temporal acceptance. Configuration and
 snapshot types live in `terrain_types.py`; deterministic RANSAC and robust
 refinement live in `plane_fitting.py`. Existing imports from `estimator` remain

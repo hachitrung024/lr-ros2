@@ -5,7 +5,7 @@ import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, OpaqueFunction
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import EnvironmentVariable, LaunchConfiguration
 from launch_ros.actions import Node
 
 
@@ -29,6 +29,13 @@ def launch_setup(context, *args, **kwargs):
             executable="terrain_geometry_node",
             name="terrain_geometry",
             output="screen",
+            # Small XYZ matrix operations contend with the other Jetson nodes
+            # when OpenBLAS starts one worker per CPU. Scope this to terrain.
+            additional_env={
+                "OPENBLAS_NUM_THREADS": EnvironmentVariable(
+                    "TERRAIN_OPENBLAS_NUM_THREADS", default_value="1",
+                ),
+            },
             parameters=[
                 LaunchConfiguration("terrain_params_file"),
                 overrides,

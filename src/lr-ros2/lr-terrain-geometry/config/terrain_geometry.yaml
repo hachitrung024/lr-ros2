@@ -33,14 +33,14 @@ terrain_geometry:
     terrain.max_points_per_cell_per_frame: 200
     terrain.max_points_per_cell: 1500
     terrain.point_window_seconds: 10.0
-    terrain.voxel_size_m: 0.05
-    terrain.fit_every_frames: 5
+    terrain.voxel_size_m: 0.1
+    terrain.fit_every_frames: 3
     terrain.max_cells_fit_per_cycle: 100
-    terrain.max_central_fit_points: 1200
-    terrain.max_neighbor_fit_points: 300
+    terrain.max_central_fit_points: 800
+    terrain.max_neighbor_fit_points: 150
     terrain.neighbor_halo_m: 0.10
-    terrain.ransac_iterations: 160
-    terrain.robust_refinement_iterations: 3
+    terrain.ransac_iterations: 100
+    terrain.robust_refinement_iterations: 2
 
     terrain.min_accumulation_frames: 3
     terrain.min_cell_points: 80
