@@ -80,6 +80,15 @@ in flight at seek time from evicting the new timeline's masks and depth.
 Diagnostics count these as `future_inputs_dropped`.
 
 Both nodes report unavailable/stale output on `/diagnostics`.
+The instance-mask publisher and the estimator's mask/depth subscriptions use
+Reliable QoS with a bounded DDS history of 10 images. Registered ZED depth is
+published reliably; using a Best Effort reader can lose large image samples
+before they reach the timestamp matching buffer. Overlay and RGB inference
+input remain Best Effort. For an external Best Effort publisher, set the
+corresponding `input.mask_reliability` or `input.depth_reliability` parameter to
+`best_effort`. `input.queue_depth` controls the estimator's DDS history;
+`sync_buffer.*` separately bounds the decoded-message matching history.
+
 `diagnostics.stale_after_sec` defaults to 2 s and uses ROS time, so pausing an
 SVO does not age a successful observation. Box diagnostics also report
 `invalid_pairs`, `unobservable_instances`, and `tf_failures`.

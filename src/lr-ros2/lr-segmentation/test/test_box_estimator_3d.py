@@ -203,11 +203,14 @@ def ros_context():
             rclpy.shutdown()
 
 
-def test_box_node_publishes_standard_detection3d_array(ros_context):
+@pytest.mark.parametrize("reliability", ["reliable", "best_effort"])
+def test_box_node_publishes_standard_detection3d_array(ros_context, reliability):
     node = BoxEstimator3DNode(
         parameter_overrides=[
             Parameter("input.mask_topic", value="/box_test/mask"),
             Parameter("input.depth_topic", value="/box_test/depth"),
+            Parameter("input.mask_reliability", value=reliability),
+            Parameter("input.depth_reliability", value=reliability),
             Parameter("input.camera_info_topic", value="/box_test/camera_info"),
             Parameter("output.box_topic", value="/box_test/boxes_3d"),
             Parameter(
@@ -230,8 +233,13 @@ def test_box_node_publishes_standard_detection3d_array(ros_context):
     sensor_qos = QoSProfile(depth=1)
     sensor_qos.reliability = ReliabilityPolicy.BEST_EFFORT
     sensor_qos.durability = DurabilityPolicy.VOLATILE
-    mask_publisher = driver.create_publisher(Image, "/box_test/mask", sensor_qos)
-    depth_publisher = driver.create_publisher(Image, "/box_test/depth", sensor_qos)
+    input_qos = QoSProfile(
+        depth=10,
+        reliability=(ReliabilityPolicy.RELIABLE if reliability == "reliable"
+                     else ReliabilityPolicy.BEST_EFFORT),
+    )
+    mask_publisher = driver.create_publisher(Image, "/box_test/mask", input_qos)
+    depth_publisher = driver.create_publisher(Image, "/box_test/depth", input_qos)
     info_publisher = driver.create_publisher(
         CameraInfo,
         "/box_test/camera_info",

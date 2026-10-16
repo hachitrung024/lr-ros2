@@ -69,7 +69,8 @@ class SegmentationNode(Node):
         self._mask_publisher = self.create_publisher(
             Image,
             "~/instance_mask",
-            image_qos,
+            # A lost label image cannot be reconstructed by the 3D consumer.
+            QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE),
         )
         self._image_subscription = self.create_subscription(
             Image,

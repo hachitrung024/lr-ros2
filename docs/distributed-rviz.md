@@ -79,6 +79,30 @@ Raw images, depth maps and point clouds use substantial bandwidth. A wired LAN
 is preferable. For a constrained link, reduce the ZED publication resolution,
 image frame rate and point-cloud frequency before changing application QoS.
 
+## A mask appears but its 3D footprint is late or missing
+
+Check the `box_estimator_3d` status on `/diagnostics`: compare `masks_received`,
+`matched_pairs`, `dropped_masks`, `invalid_pairs`, and `tf_failures`.
+Many received masks but few matched pairs indicate a mask/depth delivery or
+timestamp problem. `All instances have insufficient valid depth` means a
+2D detection exists but cannot yet support a 3D measurement. `Waiting for
+object confirmation` means the tracker needs another matching measurement.
+
+The bundled segmentation configuration uses **Reliable** mask and registered
+depth delivery with DDS history 10; ZED publishes registered depth reliably.
+Best Effort depth delivery can lose large 1080p samples before the timestamp
+matching buffer receives them, even when both nodes run on Jetson. The overlay
+remains Best Effort. After updating this configuration, restart the complete
+Jetson backend so the mask publisher and estimator use compatible QoS. For an
+external Best Effort image source, explicitly set `input.mask_reliability` or
+`input.depth_reliability` to `best_effort` in the segmentation parameters file.
+
+The RViz preset displays `/segmentation/box_markers` as vertical footprint
+prisms; rectangular OBB markers are hidden by default. Markers expire after
+`visualization.hold_sec` (0.5 seconds of ROS time), so sparse measured updates
+can make a footprint flash briefly. Check synchronization and valid depth
+before increasing this presentation hold or the timestamp tolerance.
+
 ## UI modes
 
 For SVO playback, use `use_sim_time:=true svo_mode:=true`. RViz then follows the

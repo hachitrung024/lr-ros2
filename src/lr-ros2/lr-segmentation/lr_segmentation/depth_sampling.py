@@ -85,9 +85,13 @@ def instance_point_clouds(
 ) -> dict[int, np.ndarray]:
     """Group valid pixels once, retaining empty entries for unobservable instances."""
     fx, fy, cx, cy = _camera_intrinsics(camera_info)
+    # Labels are uint16 instance IDs. Count across the full image so instances
+    # missed by spatial sampling still appear as unobservable, without sorting
+    # every pixel just to discover the IDs.
+    instance_ids = np.flatnonzero(np.bincount(labels.ravel()))
     clouds = {
         int(label): np.empty((0, 3), dtype=np.float64)
-        for label in np.unique(labels) if label != 0
+        for label in instance_ids if label != 0
     }
     sampled_labels = labels[::sampling_stride, ::sampling_stride]
     sampled_depth = depth_m[::sampling_stride, ::sampling_stride]

@@ -13,6 +13,9 @@ box_estimator_3d:
     input.mask_topic: /segmentation/instance_mask
     input.depth_topic: /zed/zed_node/depth/depth_registered
     input.camera_info_topic: /zed/zed_node/rgb/color/rect/camera_info
+    input.mask_reliability: reliable
+    input.depth_reliability: reliable
+    input.queue_depth: 10
     output.box_topic: /segmentation/boxes_3d
     output.footprint_topic: /segmentation/tracked_footprints
     output.marker_topic: /segmentation/box_markers

@@ -68,8 +68,9 @@ def fit_oriented_box(
     rotation = np.column_stack((axis_x, axis_y, up))
 
     projections = values @ rotation
-    lower = np.quantile(projections, trim_fraction, axis=0)
-    upper = np.quantile(projections, 1.0 - trim_fraction, axis=0)
+    lower, upper = np.quantile(
+        projections, [trim_fraction, 1.0 - trim_fraction], axis=0
+    )
     center = rotation @ ((lower + upper) * 0.5)
     size = np.maximum(upper - lower, minimum_size_m)
     return BoxMeasurement(
@@ -182,8 +183,9 @@ def _robust_z_limits(
     minimum_height_m: float,
 ) -> tuple[float, float]:
     """Estimate prism bottom and top while trimming isolated Z samples."""
-    minimum_z = float(np.quantile(values, trim_fraction))
-    maximum_z = float(np.quantile(values, 1.0 - trim_fraction))
+    minimum_z, maximum_z = map(
+        float, np.quantile(values, [trim_fraction, 1.0 - trim_fraction])
+    )
     if maximum_z - minimum_z < minimum_height_m:
         middle = (minimum_z + maximum_z) * 0.5
         minimum_z = middle - minimum_height_m * 0.5

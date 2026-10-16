@@ -64,6 +64,13 @@ class BoxEstimator3DNode(Node):
             "input.depth_topic",
             "/zed/zed_node/depth/depth_registered",
         ).value
+        self._mask_reliability = self.declare_parameter(
+            "input.mask_reliability", "reliable",
+        ).value
+        self._depth_reliability = self.declare_parameter(
+            "input.depth_reliability", "reliable",
+        ).value
+        self._input_queue_depth = self.declare_parameter("input.queue_depth", 10).value
         self._camera_info_topic = self.declare_parameter(
             "input.camera_info_topic",
             "/zed/zed_node/rgb/color/rect/camera_info",
@@ -230,13 +237,13 @@ class BoxEstimator3DNode(Node):
             Image,
             str(self._mask_topic),
             self._on_mask,
-            sensor_qos,
+            self._input_image_qos(self._mask_reliability),
         )
         self._depth_subscription = self.create_subscription(
             Image,
             str(self._depth_topic),
             self._on_depth,
-            sensor_qos,
+            self._input_image_qos(self._depth_reliability),
         )
         self._camera_info_subscription = self.create_subscription(
             CameraInfo,
@@ -290,7 +297,22 @@ class BoxEstimator3DNode(Node):
             f"frame={self._output_frame or 'source'}"
         )
 
+    def _input_image_qos(self, reliability: str) -> QoSProfile:
+        """Retain image fragments and short callback bursts for delayed masks."""
+        return QoSProfile(
+            depth=self._input_queue_depth,
+            reliability=(ReliabilityPolicy.RELIABLE if reliability == "reliable"
+                         else ReliabilityPolicy.BEST_EFFORT),
+            durability=DurabilityPolicy.VOLATILE,
+        )
+
     def _validate_parameters(self) -> None:
+        for name, value in (
+            ("input.mask_reliability", self._mask_reliability),
+            ("input.depth_reliability", self._depth_reliability),
+        ):
+            if value not in {"reliable", "best_effort"}:
+                raise ValueError(f"{name} must be reliable or best_effort")
         if not math.isfinite(self._tf_timeout_sec) or self._tf_timeout_sec < 0.0:
             raise ValueError("tf_timeout_sec must be finite and non-negative")
         _require_positive("diagnostics.stale_after_sec", self._stale_after_sec)
@@ -314,6 +336,7 @@ class BoxEstimator3DNode(Node):
         ):
             raise ValueError("depth range is invalid")
         for name, value in (
+            ("input.queue_depth", self._input_queue_depth),
             ("sampling_stride", self._sampling_stride),
             ("maximum_points_per_instance", self._maximum_points_per_instance),
             ("minimum_points_per_instance", self._minimum_points_per_instance),
