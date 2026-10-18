@@ -17,9 +17,15 @@ The default launch limits OpenBLAS to one thread for this node, reducing CPU
 contention on Jetson while leaving the other backend processes unchanged.
 Set `TERRAIN_OPENBLAS_NUM_THREADS` before launching to override it. This applies
 before NumPy loads; a direct `ros2 run` instead needs `OPENBLAS_NUM_THREADS=1`.
-The YAML uses a three-cloud fit cadence, 800 central / 150 neighboring fit
-points, 100 RANSAC hypotheses and two refinement iterations. Accumulation,
-confirmation and plane-quality thresholds still apply independently.
+The YAML checks for eligible fits on every cloud, with 600 central / 100
+neighboring fit points, 80 RANSAC hypotheses and two refinement iterations.
+Each cell needs one new contributing frame and at least 60 accumulated points
+before fitting. Two consistent good fits from distinct contributing frames
+are still required to accept a new plane. The minimum minor principal spread
+is 0.08 m; RMSE, distance and slope limits are unchanged. Heatmap output uses
+12 pixels per cell to reduce generation and transport cost when subscribed.
+See `docs/terrain-profile-search-jetson.md` at the workspace root for the
+Jetson profile comparison, quality tradeoffs and measurement limitations.
 
 `tools/benchmark_latency.py` runs the headless pipeline with an instrumented
 terrain node. Do not run it alongside an existing backend. It records callback
