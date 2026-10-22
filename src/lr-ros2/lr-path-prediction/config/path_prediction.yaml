@@ -8,6 +8,9 @@ canonical_prediction_visualizer:
     output.markers_topic: /lr/path_prediction/markers
     output.reference_path_topic: /lr/path_prediction/reference_path
     frames.map_frame: map
+    # Display policy: minimum valid normalized SSM / stability moment / ZMP.
+    warning.rollover_normalized_margin: 0.20
+    critical.rollover_normalized_margin: 0.0
     warning.slope_deg: 20.0
     critical.slope_deg: 30.0
     visualization.normal_length_m: 0.8

@@ -110,3 +110,31 @@ in `lr_prediction_bridge/test`, and terrain sampling tests in
 The visualizer joins asynchronous messages by trajectory ID, buffers results
 that arrive before trajectory/geometry, clears warnings when evidence is
 unavailable, and renders markers only for subscribers.
+
+## Rollover display policy
+
+For each terrain-covered step with prediction evidence, the visualizer uses the
+minimum finite normalized Static SSM, valid stability moment, and valid ZMP
+margin. Values at or below `warning.rollover_normalized_margin` (default 0.20)
+show an orange `ROLLOVER WARNING` sign; values at or below
+`critical.rollover_normalized_margin` (default 0.0) show a red `ROLLOVER CRITICAL` sign.
+Zero represents the support/tipping boundary. Labels identify the limiting
+metric and value. These configurable display defaults are not calibrated
+vehicle safety thresholds and do not issue Stop/Go commands.
+
+Missing evidence is UNKNOWN, not zero or safe. Diagnostics include
+`rollover_level`, `rollover_source`, and `rollover_normalized_margin`; terrain
+without prediction evidence reports `ROLLOVER UNKNOWN`. Invalid dynamic metrics
+are ignored while available static evidence can still be displayed. The policy
+continues to use static evidence in the default static profile.
+
+Slope labels retain their separate 20/30 degree policy. Rollover warnings also
+color path points orange/red; the nearest collision retains its magenta point
+and triangle. Each hazard type has one triangle with `!` at its nearest
+warning step. The collision sign is magenta and labeled `COLLISION`; the
+rollover sign is orange/red and labeled `ROLLOVER WARNING/CRITICAL`, including
+the limiting metric and value. Rollover uses a higher vertical lane so both
+signs and labels remain separate when they occur at the same point. All
+warning steps keep their point colors even when only the nearest has a sign.
+Old warning markers are deleted on each redraw, including recovery or loss of
+evidence. Existing freshness and rewind handling applies to rollover as well.

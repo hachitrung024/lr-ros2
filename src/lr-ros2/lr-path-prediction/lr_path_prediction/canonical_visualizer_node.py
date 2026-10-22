@@ -86,6 +86,16 @@ class CanonicalPredictionVisualizerNode(Node):
             ).value
         )
         self._map_frame = str(self.declare_parameter("frames.map_frame", "map").value).strip()
+        self._rollover_warning_margin = float(self.declare_parameter(
+            "warning.rollover_normalized_margin", 0.20,
+        ).value)
+        self._rollover_critical_margin = float(self.declare_parameter(
+            "critical.rollover_normalized_margin", 0.0,
+        ).value)
+        if not (math.isfinite(self._rollover_warning_margin)
+                and math.isfinite(self._rollover_critical_margin)
+                and self._rollover_critical_margin < self._rollover_warning_margin):
+            raise ValueError("rollover margins must be finite with critical < warning")
         self._slope_warning_deg = float(self.declare_parameter("warning.slope_deg", 20.0).value)
         self._slope_critical_deg = float(self.declare_parameter("critical.slope_deg", 30.0).value)
         self._normal_length_m = float(
@@ -384,6 +394,8 @@ class CanonicalPredictionVisualizerNode(Node):
                     header,
                     slope_warning_deg=self._slope_warning_deg,
                     slope_critical_deg=self._slope_critical_deg,
+                    rollover_warning_margin=self._rollover_warning_margin,
+                    rollover_critical_margin=self._rollover_critical_margin,
                 )
             )
         if self._markers_publisher.get_subscription_count():
@@ -393,6 +405,8 @@ class CanonicalPredictionVisualizerNode(Node):
                     header,
                     slope_warning_deg=self._slope_warning_deg,
                     slope_critical_deg=self._slope_critical_deg,
+                    rollover_warning_margin=self._rollover_warning_margin,
+                    rollover_critical_margin=self._rollover_critical_margin,
                     normal_length_m=self._normal_length_m,
                     marker_z_offset_m=0.0,
                     label_height_m=self._label_height_m,

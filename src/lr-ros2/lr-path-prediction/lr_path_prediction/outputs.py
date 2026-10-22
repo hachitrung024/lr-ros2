@@ -19,6 +19,8 @@ def predictions_to_diagnostics(
     *,
     slope_warning_deg: float,
     slope_critical_deg: float,
+    rollover_warning_margin: float = 0.20,
+    rollover_critical_margin: float = 0.0,
 ) -> DiagnosticArray:
     """Serialize every predicted step as one standard diagnostic status."""
     message = DiagnosticArray()
@@ -28,6 +30,8 @@ def predictions_to_diagnostics(
             prediction,
             slope_warning_deg,
             slope_critical_deg,
+            rollover_warning_margin,
+            rollover_critical_margin,
         )
         status = DiagnosticStatus()
         status.level = level
@@ -35,7 +39,13 @@ def predictions_to_diagnostics(
         status.hardware_id = "landfill_rover"
         status.message = ", ".join(labels)
         normal = prediction.terrain.normal_xyz
+        rollover_level, rollover_source, rollover_margin = rollover_risk(
+            prediction, rollover_warning_margin, rollover_critical_margin,
+        )
         status.values = [
+            _value("rollover_level", "UNKNOWN" if rollover_level is None else rollover_level),
+            _value("rollover_source", rollover_source),
+            _value("rollover_normalized_margin", rollover_margin),
             _value("step_index", prediction.step_index),
             _value("source_pose_index", prediction.source_pose_index),
             _value("x_m", prediction.position_xyz[0]),
@@ -129,6 +139,8 @@ def predictions_to_markers(
     *,
     slope_warning_deg: float,
     slope_critical_deg: float,
+    rollover_warning_margin: float = 0.20,
+    rollover_critical_margin: float = 0.0,
     normal_length_m: float,
     marker_z_offset_m: float,
     label_height_m: float,
@@ -138,7 +150,7 @@ def predictions_to_markers(
     collision_warning_symbol_scale_m: float = 0.60,
     hide_unknown_terrain: bool = False,
 ) -> MarkerArray:
-    """Build path points, slope UI, one collision warning, and normals."""
+    """Build path points, slope UI, distinct hazard signs, and normals."""
     output = MarkerArray()
     clear = Marker()
     clear.header = header
@@ -164,6 +176,18 @@ def predictions_to_markers(
             slope_critical_deg,
             show_collision=is_nearest_collision,
         )
+        rollover_level, source, margin = rollover_risk(
+            prediction, rollover_warning_margin, rollover_critical_margin,
+        )
+        if rollover_level in (DiagnosticStatus.WARN, DiagnosticStatus.ERROR):
+            rollover_color = ColorRGBA(
+                r=1.0, g=0.05 if rollover_level == DiagnosticStatus.ERROR else 0.65,
+                b=0.0, a=1.0,
+            )
+            if (not is_nearest_collision
+                    and (rollover_level == DiagnosticStatus.ERROR
+                         or prediction.terrain.slope_deg < slope_critical_deg)):
+                point_color = rollover_color
         slope_color = _slope_color(
             prediction,
             slope_warning_deg,
@@ -212,7 +236,7 @@ def predictions_to_markers(
             output.markers.append(arrow)
 
     if nearest_collision is not None:
-        _append_collision_warning(
+        _append_warning(
             output,
             nearest_collision,
             header,
@@ -221,6 +245,36 @@ def predictions_to_markers(
             triangle_size_m=collision_warning_triangle_size_m,
             line_width_m=collision_warning_line_width_m,
             symbol_scale_m=collision_warning_symbol_scale_m,
+        )
+
+    rollover_candidates = [
+        item for item in visible_predictions
+        if rollover_risk(item, rollover_warning_margin, rollover_critical_margin)[0]
+        in (DiagnosticStatus.WARN, DiagnosticStatus.ERROR)
+    ]
+    if rollover_candidates:
+        nearest_rollover = min(
+            rollover_candidates, key=lambda item: (item.distance_from_start_m, item.step_index),
+        )
+        level, source, margin = rollover_risk(
+            nearest_rollover, rollover_warning_margin, rollover_critical_margin,
+        )
+        color = ColorRGBA(
+            r=1.0, g=0.05 if level == DiagnosticStatus.ERROR else 0.65, b=0.0, a=1.0,
+        )
+        severity = "CRITICAL" if level == DiagnosticStatus.ERROR else "WARNING"
+        _append_warning(
+            output, nearest_rollover, header,
+            marker_z_offset_m=marker_z_offset_m,
+            # Separate vertical lanes even if both hazards share a path point.
+            warning_height_m=(collision_warning_height_m
+                              + 1.8 * collision_warning_triangle_size_m),
+            triangle_size_m=collision_warning_triangle_size_m,
+            line_width_m=collision_warning_line_width_m,
+            symbol_scale_m=collision_warning_symbol_scale_m,
+            namespace="rollover_warning",
+            title=f"ROLLOVER {severity} ({source}: {margin:.2f})",
+            color=color,
         )
 
     output.markers.insert(1, points)
@@ -267,10 +321,39 @@ def _terrain_visible_prefix(
     return visible
 
 
+def rollover_risk(
+    prediction: StepPrediction,
+    warning_margin: float = 0.20,
+    critical_margin: float = 0.0,
+) -> tuple[int | None, str, float]:
+    """Classify the least valid normalized stability evidence for display only."""
+    if not (math.isfinite(warning_margin) and math.isfinite(critical_margin)
+            and critical_margin < warning_margin):
+        raise ValueError("rollover margins must be finite with critical < warning")
+    if not prediction.terrain.valid:
+        return None, "unavailable", math.nan
+    evidence = []
+    if math.isfinite(prediction.normalized_static_stability_margin):
+        evidence.append(("SSM", prediction.normalized_static_stability_margin))
+    if (prediction.stability_moment_valid
+            and math.isfinite(prediction.normalized_minimum_stability_moment)):
+        evidence.append(("MOMENT", prediction.normalized_minimum_stability_moment))
+    if prediction.zmp_valid and math.isfinite(prediction.normalized_zmp_margin):
+        evidence.append(("ZMP", prediction.normalized_zmp_margin))
+    if not evidence:
+        return None, "unavailable", math.nan
+    source, margin = min(evidence, key=lambda item: item[1])
+    level = (DiagnosticStatus.ERROR if margin <= critical_margin else
+             DiagnosticStatus.WARN if margin <= warning_margin else DiagnosticStatus.OK)
+    return level, source, margin
+
+
 def _risk(
     prediction: StepPrediction,
     warning_deg: float,
     critical_deg: float,
+    rollover_warning_margin: float = 0.20,
+    rollover_critical_margin: float = 0.0,
 ) -> tuple[int, list[str]]:
     labels = []
     level = DiagnosticStatus.OK
@@ -290,6 +373,16 @@ def _risk(
     elif prediction.terrain.slope_deg >= warning_deg:
         labels.append("SLOPE WARNING")
         level = max(level, DiagnosticStatus.WARN)
+    rollover_level, _, _ = rollover_risk(
+        prediction, rollover_warning_margin, rollover_critical_margin,
+    )
+    if rollover_level is None and prediction.terrain.valid:
+        labels.append("ROLLOVER UNKNOWN")
+        level = max(level, DiagnosticStatus.WARN)
+    elif rollover_level in (DiagnosticStatus.WARN, DiagnosticStatus.ERROR):
+        labels.append("ROLLOVER CRITICAL" if rollover_level == DiagnosticStatus.ERROR
+                      else "ROLLOVER WARNING")
+        level = max(level, rollover_level)
     if not labels:
         labels.append("CLEAR")
     return level, labels
@@ -340,7 +433,7 @@ def _nearest_collision_prediction(
     )
 
 
-def _append_collision_warning(
+def _append_warning(
     output: MarkerArray,
     prediction: StepPrediction,
     header: Header,
@@ -350,8 +443,13 @@ def _append_collision_warning(
     triangle_size_m: float,
     line_width_m: float,
     symbol_scale_m: float,
+    namespace: str = "collision_warning",
+    title: str = "COLLISION",
+    color: ColorRGBA | None = None,
 ) -> None:
-    """Place a single large triangle/exclamation above a collision point."""
+    """Place a triangle, exclamation, and explicit hazard label above a point."""
+    if color is None:
+        color = ColorRGBA(r=1.0, g=0.0, b=0.55, a=1.0)
     point = _display_position(prediction, marker_z_offset_m)
     center_z = point.z + warning_height_m
     half_width = triangle_size_m * 0.5
@@ -375,7 +473,7 @@ def _append_collision_warning(
         z=center_z - triangle_height / 3.0,
     )
 
-    fill = _base_marker(header, "collision_warning_fill", 0, Marker.TRIANGLE_LIST)
+    fill = _base_marker(header, f"{namespace}_fill", 0, Marker.TRIANGLE_LIST)
     fill.points = [
         top,
         lower_left,
@@ -384,16 +482,16 @@ def _append_collision_warning(
         lower_right,
         lower_left,
     ]
-    fill.color = ColorRGBA(r=0.65, g=0.0, b=0.12, a=0.70)
+    fill.color = ColorRGBA(r=color.r, g=color.g, b=color.b, a=0.70)
     output.markers.append(fill)
 
-    outline = _base_marker(header, "collision_warning_outline", 0, Marker.LINE_STRIP)
+    outline = _base_marker(header, f"{namespace}_outline", 0, Marker.LINE_STRIP)
     outline.points = [top, lower_left, lower_right, top]
     outline.scale.x = line_width_m
-    outline.color = ColorRGBA(r=1.0, g=0.0, b=0.20, a=1.0)
+    outline.color = color
     output.markers.append(outline)
 
-    symbol = _base_marker(header, "collision_warning_symbol", 0, Marker.TEXT_VIEW_FACING)
+    symbol = _base_marker(header, f"{namespace}_symbol", 0, Marker.TEXT_VIEW_FACING)
     symbol.pose.position.x = point.x
     symbol.pose.position.y = point.y
     symbol.pose.position.z = center_z + 0.03
@@ -401,6 +499,16 @@ def _append_collision_warning(
     symbol.color = ColorRGBA(r=1.0, g=1.0, b=1.0, a=1.0)
     symbol.text = "!"
     output.markers.append(symbol)
+
+    label = _base_marker(header, f"{namespace}_label", 0, Marker.TEXT_VIEW_FACING)
+    label.pose.position = Point(
+        x=point.x, y=point.y,
+        z=center_z + triangle_height * (2.0 / 3.0) + 0.25,
+    )
+    label.scale.z = 0.25
+    label.color = color
+    label.text = title
+    output.markers.append(label)
 
 
 def _display_position(

@@ -202,3 +202,94 @@ def test_only_nearest_collision_is_highlighted():
     assert points.colors[0].r == 0.55
     assert points.colors[1].r == 1.0
     assert points.colors[1].b == 0.55
+
+
+def test_rollover_policy_boundaries_and_valid_dynamic_evidence():
+    from dataclasses import replace
+    from lr_path_prediction.outputs import rollover_risk
+
+    base = _prediction()
+    for margin, expected in ((1.0, DiagnosticStatus.OK),
+                             (0.20, DiagnosticStatus.WARN),
+                             (0.0, DiagnosticStatus.ERROR),
+                             (-0.1, DiagnosticStatus.ERROR)):
+        item = replace(base, normalized_static_stability_margin=margin)
+        assert rollover_risk(item) == (expected, "SSM", margin)
+    item = replace(base, normalized_static_stability_margin=0.8,
+                   stability_moment_valid=True, normalized_minimum_stability_moment=0.1,
+                   zmp_valid=False, normalized_zmp_margin=-1.0)
+    assert rollover_risk(item) == (DiagnosticStatus.WARN, "MOMENT", 0.1)
+    item = replace(item, zmp_valid=True, normalized_zmp_margin=-0.1)
+    assert rollover_risk(item) == (DiagnosticStatus.ERROR, "ZMP", -0.1)
+    assert rollover_risk(base)[0] is None
+    assert rollover_risk(replace(item, terrain=TerrainSample(valid=False)))[0] is None
+    assert rollover_risk(replace(base, normalized_static_stability_margin=math.inf))[0] is None
+    custom = replace(base, normalized_static_stability_margin=0.3)
+    assert rollover_risk(custom, 0.4, 0.1)[0] == DiagnosticStatus.WARN
+
+
+def test_rollover_markers_and_diagnostics_preserve_collision_warning():
+    from dataclasses import replace
+
+    item = replace(_prediction(collision=True), normalized_static_stability_margin=-0.1)
+    diagnostics = predictions_to_diagnostics(
+        [item], Header(frame_id="map"), slope_warning_deg=20.0, slope_critical_deg=30.0,
+    )
+    assert diagnostics.status[0].level == DiagnosticStatus.ERROR
+    assert "ROLLOVER CRITICAL" in diagnostics.status[0].message
+    assert "OBJECT COLLISION" in diagnostics.status[0].message
+    markers = predictions_to_markers(
+        [item], Header(frame_id="map"), slope_warning_deg=20.0, slope_critical_deg=30.0,
+        normal_length_m=0.8, marker_z_offset_m=0.0, label_height_m=0.45,
+    ).markers
+    assert any(m.ns == "rollover_warning_label" and "SSM: -0.10" in m.text for m in markers)
+    assert any(m.ns == "collision_warning_symbol" for m in markers)
+    points = next(m for m in markers if m.ns == "prediction_steps")
+    assert points.colors[0].b == 0.55  # Collision keeps its magenta point.
+    # Recovery deletes old warning markers before drawing the new cycle.
+    recovered = predictions_to_markers(
+        [replace(item, object_collision=False, normalized_static_stability_margin=1.0)],
+        Header(frame_id="map"), slope_warning_deg=20.0, slope_critical_deg=30.0,
+        normal_length_m=0.8, marker_z_offset_m=0.0, label_height_m=0.45,
+    ).markers
+    assert recovered[0].action == Marker.DELETEALL
+    assert not any(m.ns.startswith("rollover_warning") for m in recovered)
+
+
+def test_rollover_unknown_and_invalid_policy():
+    import pytest
+    from lr_path_prediction.outputs import rollover_risk
+
+    for warning, critical in ((0.2, 0.2), (0.1, 0.2), (math.nan, 0.0)):
+        with pytest.raises(ValueError):
+            rollover_risk(_prediction(), warning, critical)
+    diagnostics = predictions_to_diagnostics(
+        [_prediction()], Header(), slope_warning_deg=20.0, slope_critical_deg=30.0,
+    )
+    assert "ROLLOVER UNKNOWN" in diagnostics.status[0].message
+    assert diagnostics.status[0].level == DiagnosticStatus.WARN
+
+
+def test_hazard_signs_have_distinct_labels_colors_and_separate_vertical_lanes():
+    from dataclasses import replace
+
+    near = replace(_prediction(collision=True), normalized_static_stability_margin=0.1)
+    far = replace(near, step_index=2, distance_from_start_m=4.0)
+    markers = predictions_to_markers(
+        [far, near], Header(frame_id="map"),
+        slope_warning_deg=20.0, slope_critical_deg=30.0,
+        normal_length_m=0.8, marker_z_offset_m=0.0, label_height_m=0.45,
+    ).markers
+    by_ns = {m.ns: m for m in markers}
+    assert by_ns["collision_warning_label"].text == "COLLISION"
+    assert "ROLLOVER WARNING" in by_ns["rollover_warning_label"].text
+    for kind in ("collision", "rollover"):
+        assert by_ns[f"{kind}_warning_symbol"].text == "!"
+        assert by_ns[f"{kind}_warning_fill"].type == Marker.TRIANGLE_LIST
+        assert len([m for m in markers if m.ns == f"{kind}_warning_symbol"]) == 1
+        assert by_ns[f"{kind}_warning_symbol"].pose.position.x == near.position_xyz[0]
+    collision_top = max(p.z for p in by_ns["collision_warning_outline"].points)
+    rollover_bottom = min(p.z for p in by_ns["rollover_warning_outline"].points)
+    assert rollover_bottom > collision_top + 0.5
+    assert by_ns["collision_warning_outline"].color.b == 0.55
+    assert by_ns["rollover_warning_outline"].color.g == 0.65
