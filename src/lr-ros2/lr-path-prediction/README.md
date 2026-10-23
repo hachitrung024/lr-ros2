@@ -115,7 +115,7 @@ unavailable, and renders markers only for subscribers.
 
 For each terrain-covered step with prediction evidence, the visualizer uses the
 minimum finite normalized Static SSM, valid stability moment, and valid ZMP
-margin. Values at or below `warning.rollover_normalized_margin` (default 0.20)
+margin. Values at or below `warning.rollover_normalized_margin` (default 0.50)
 show an orange `ROLLOVER WARNING` sign; values at or below
 `critical.rollover_normalized_margin` (default 0.0) show a red `ROLLOVER CRITICAL` sign.
 Zero represents the support/tipping boundary. Labels identify the limiting

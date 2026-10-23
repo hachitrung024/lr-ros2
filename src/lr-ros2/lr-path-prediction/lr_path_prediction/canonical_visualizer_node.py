@@ -87,7 +87,7 @@ class CanonicalPredictionVisualizerNode(Node):
         )
         self._map_frame = str(self.declare_parameter("frames.map_frame", "map").value).strip()
         self._rollover_warning_margin = float(self.declare_parameter(
-            "warning.rollover_normalized_margin", 0.20,
+            "warning.rollover_normalized_margin", 0.50,
         ).value)
         self._rollover_critical_margin = float(self.declare_parameter(
             "critical.rollover_normalized_margin", 0.0,

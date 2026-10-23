@@ -19,7 +19,7 @@ def predictions_to_diagnostics(
     *,
     slope_warning_deg: float,
     slope_critical_deg: float,
-    rollover_warning_margin: float = 0.20,
+    rollover_warning_margin: float = 0.50,
     rollover_critical_margin: float = 0.0,
 ) -> DiagnosticArray:
     """Serialize every predicted step as one standard diagnostic status."""
@@ -139,7 +139,7 @@ def predictions_to_markers(
     *,
     slope_warning_deg: float,
     slope_critical_deg: float,
-    rollover_warning_margin: float = 0.20,
+    rollover_warning_margin: float = 0.50,
     rollover_critical_margin: float = 0.0,
     normal_length_m: float,
     marker_z_offset_m: float,
@@ -323,7 +323,7 @@ def _terrain_visible_prefix(
 
 def rollover_risk(
     prediction: StepPrediction,
-    warning_margin: float = 0.20,
+    warning_margin: float = 0.50,
     critical_margin: float = 0.0,
 ) -> tuple[int | None, str, float]:
     """Classify the least valid normalized stability evidence for display only."""
@@ -352,7 +352,7 @@ def _risk(
     prediction: StepPrediction,
     warning_deg: float,
     critical_deg: float,
-    rollover_warning_margin: float = 0.20,
+    rollover_warning_margin: float = 0.50,
     rollover_critical_margin: float = 0.0,
 ) -> tuple[int, list[str]]:
     labels = []
