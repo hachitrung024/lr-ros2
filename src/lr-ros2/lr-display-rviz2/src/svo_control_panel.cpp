@@ -122,13 +122,27 @@ void SvoControlPanel::onInitialize()
   }
 
   node_ = node_abstraction->get_raw_node();
+  std::string control_namespace;
+  if (node_->has_parameter("svo_control_namespace")) {
+    control_namespace = node_->get_parameter("svo_control_namespace").as_string();
+  } else {
+    control_namespace = node_->declare_parameter<std::string>("svo_control_namespace", "");
+  }
+  while (!control_namespace.empty() && control_namespace.back() == '/') {
+    control_namespace.pop_back();
+  }
+  if (control_namespace.empty()) {
+    control_namespace = "zed_node";
+  }
   status_subscription_ = node_->create_subscription<zed_msgs::msg::SvoStatus>(
-    "zed_node/status/svo", rclcpp::QoS(10),
+    control_namespace + "/status/svo", rclcpp::QoS(10),
     [this](zed_msgs::msg::SvoStatus::SharedPtr msg) {  // Forward to the Qt thread.
       handleStatus(msg);
     });
-  toggle_client_ = node_->create_client<std_srvs::srv::Trigger>("zed_node/toggle_svo_pause");
-  seek_client_ = node_->create_client<zed_msgs::srv::SetSvoFrame>("zed_node/set_svo_frame");
+  toggle_client_ =
+    node_->create_client<std_srvs::srv::Trigger>(control_namespace + "/toggle_svo_pause");
+  seek_client_ =
+    node_->create_client<zed_msgs::srv::SetSvoFrame>(control_namespace + "/set_svo_frame");
 
   refresh_timer_->start(500);
 
@@ -201,6 +215,10 @@ void SvoControlPanel::refreshControls()
   const bool seek_ready = seek_client_ && seek_client_->service_is_ready();
   const bool toggle_ready = toggle_client_ && toggle_client_->service_is_ready();
   const bool active = received_status_ && !request_pending_;
+
+  if (received_status_ && !seek_ready && !toggle_ready) {
+    mode_label_->setText("SVO source unavailable");
+  }
 
   position_slider_->setEnabled(active && seek_ready && position_slider_->maximum() > 0);
   restart_button_->setEnabled(active && seek_ready);

@@ -26,6 +26,7 @@ from launch.utilities import (
     perform_substitutions,
 )
 from launch_ros.actions import Node
+from launch_ros.utilities import evaluate_parameters
 
 
 def _load_launch_module():
@@ -199,6 +200,63 @@ def test_invalid_mavlink_extrinsic_is_rejected():
     message = _substitution_text(context, actions[0].msg)
 
     assert "mavlink_body_to_camera" in message
+
+
+def test_net_svo_uses_external_clock_and_mavlink_without_local_file():
+    """NET replay must never create another clock server or a local VIO pass."""
+    module = _load_launch_module()
+    context = _context(
+        svo_path='live', stream_address='10.42.0.1', stream_port='30000',
+        stream_svo_mode='true', publish_svo_clock='false',
+        mavlink='true', future_path='true',
+    )
+    actions = module.launch_setup(context)
+    arguments = _zed_arguments(actions)
+    assert arguments['stream_address'] == '10.42.0.1'
+    assert arguments['stream_port'] == '30000'
+    assert arguments['publish_svo_clock'] == 'false'
+    assert arguments['use_sim_time'] == 'false'
+    assert arguments['publish_tf'] == 'false'
+    assert 'debug.use_pub_timestamps:=false' in _substitution_text(
+        context, arguments['param_overrides']
+    )
+    assert 'sensors.sensors_image_sync:=true' in _substitution_text(
+        context, arguments['param_overrides']
+    )
+    assert 'mavlink_pose_node' in _node_executables(actions)
+    assert not any(type(action) is ExecuteProcess for action in actions)
+    rviz = next(a for a in actions if isinstance(a, Node) and str(a.node_executable) == 'rviz2')
+    assert evaluate_parameters(context, rviz._Node__parameters)[0]['use_sim_time'] is True
+
+
+def test_net_live_keeps_tracking_and_wall_time():
+    """A live stream supports perception without enabling recorded-data nodes."""
+    module = _load_launch_module()
+    context = _context(svo_path='live', stream_address='10.42.0.1', publish_svo_clock='false')
+    actions = module.launch_setup(context)
+    arguments = _zed_arguments(actions)
+    assert arguments['publish_tf'] == 'true'
+    assert 'mavlink_pose_node' not in _node_executables(actions)
+    rviz = next(a for a in actions if isinstance(a, Node) and str(a.node_executable) == 'rviz2')
+    assert evaluate_parameters(context, rviz._Node__parameters)[0]['use_sim_time'] is False
+
+
+@pytest.mark.parametrize('overrides, error', [
+    ({'stream_port': '30001'}, 'stream_port'),
+    ({'svo_path': '/tmp/local.svo2'}, 'mutually exclusive'),
+    ({'publish_svo_clock': 'true'}, 'source /clock'),
+    ({'stream_svo_mode': 'true', 'use_sim_time': 'false'}, 'use_sim_time'),
+    ({'stream_svo_mode': 'true', 'future_path': 'true'}, 'mavlink'),
+    ({'stream_svo_mode': 'true', 'stream_address': ''}, 'stream_address'),
+])
+def test_invalid_net_combinations_fail_at_launch(overrides, error):
+    """Catch accidental dual sources, clock producers and unavailable caches early."""
+    module = _load_launch_module()
+    values = dict(svo_path='live', stream_address='10.42.0.1', publish_svo_clock='false')
+    values.update(overrides)
+    context = _context(**values)
+    actions = module.launch_setup(context)
+    assert error in _substitution_text(context, actions[0].msg)
 
 
 @pytest.mark.parametrize(

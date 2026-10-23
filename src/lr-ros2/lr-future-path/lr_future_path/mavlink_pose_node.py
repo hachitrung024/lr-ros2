@@ -56,6 +56,9 @@ class MavlinkPoseNode(Node):
         self._database_path = str(
             self.declare_parameter("mavlink_db_path", "").value
         )
+        self._match_session_start = bool(
+            self.declare_parameter("match_session_start", True).value
+        )
         pose_topic = str(
             self.declare_parameter(
                 "pose_topic", "/lr/mavlink/pose"
@@ -205,6 +208,7 @@ class MavlinkPoseNode(Node):
                 directory=self._mavlink_dir,
                 explicit_path=self._database_path,
                 tolerance_ns=self._match_tolerance_ns,
+                require_start_match=self._match_session_start,
             )
             self._trajectory = self._trajectory_loader(summary.path)
         except (MavlinkDataError, OSError, ValueError) as exception:

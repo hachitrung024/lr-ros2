@@ -21,6 +21,7 @@ from launch import LaunchContext
 from launch.actions import DeclareLaunchArgument
 from launch.utilities import normalize_to_list_of_substitutions, perform_substitutions
 from launch_ros.actions import Node
+from launch_ros.utilities import evaluate_parameters
 
 
 LAUNCH_DIR = Path(__file__).resolve().parents[1] / 'launch'
@@ -109,3 +110,20 @@ def test_rviz_entry_point_can_show_rgb_without_segmentation():
     assert rviz.expanded_remapping_rules == [
         ('/segmentation/overlay', '/front/zed_node/rgb/color/rect/image')
     ]
+
+
+def test_rviz_controls_can_target_host_source_independently_of_receiver():
+    """The panel endpoint must not move image/result subscriptions to the source."""
+    module = _load('rviz_zed_cam.launch.py')
+    context = LaunchContext()
+    context.launch_configurations.update({
+        'camera_name': 'zed', 'camera_model': 'zed2i', 'use_sim_time': 'true',
+        'svo_mode': 'true', 'segmentation_enabled': 'true', 'rviz_config': '/tmp/net.rviz',
+        'svo_control_namespace': '/zed_source/zed_node',
+    })
+    rviz = module.launch_setup(context)[0]
+    parameters = evaluate_parameters(context, rviz._Node__parameters)[0]
+    assert parameters['svo_control_namespace'] == '/zed_source/zed_node'
+    assert parameters['use_sim_time'] is True
+    rviz._perform_substitutions(context)
+    assert rviz.expanded_node_namespace == '/zed'

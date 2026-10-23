@@ -1,5 +1,13 @@
 # Landfill Rover ROS 2
 
+The distributed deployment supports **host SVO2/live camera → ZED Streaming
+NET → Jetson processing → host RViz**. The host owns the SVO source
+and `/clock`; model and MAVLink data stay on Jetson. SDK 5.4.1 uses sequential
+NET playback; pause/seek is experimental and disabled by default. See the
+[three-terminal NET workflow](docs/distributed-rviz.md#host-source--zed-net--jetson--rviz)
+and [source package](src/lr-ros2/lr-zed-stream/README.md). Direct-file and
+same-host workflows remain available below.
+
 To watch Jetson CPU, GPU, memory, temperature, and power while running ROS,
 start the [local performance dashboard](docs/jetson-dashboard.md).
 To measure ROS process CPU/RAM and existing node diagnostics on Jetson, use the

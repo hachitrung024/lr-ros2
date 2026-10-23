@@ -104,6 +104,16 @@ def launch_setup(context, *args, **kwargs):
     svo_path = LaunchConfiguration('svo_path')
     svo_realtime = LaunchConfiguration('svo_realtime')
     publish_svo_clock = LaunchConfiguration('publish_svo_clock')
+    stream_address = LaunchConfiguration('stream_address', default='').perform(context).strip()
+    stream_port = LaunchConfiguration('stream_port', default='30000').perform(context)
+    stream_svo_mode = (
+        LaunchConfiguration('stream_svo_mode', default='false').perform(context).lower() == 'true'
+    )
+    use_sim_time_option = LaunchConfiguration('use_sim_time', default='auto').perform(context)
+    use_sim_time_val = (
+        str(stream_svo_mode).lower() if stream_address else publish_svo_clock.perform(context)
+    ) if use_sim_time_option == 'auto' else use_sim_time_option
+    use_sim_time = TextSubstitution(text=use_sim_time_val)
     start_terrain_node = LaunchConfiguration('start_terrain_node')
     terrain_params_file = LaunchConfiguration('terrain_params_file')
     map_frame = LaunchConfiguration('map_frame')
@@ -139,14 +149,40 @@ def launch_setup(context, *args, **kwargs):
     segmentation_model_path_val = segmentation_model_path.perform(context).strip()
     start_prediction_val = start_path_prediction_node.perform(context).lower()
     prediction_profile_val = prediction_profile.perform(context).lower()
-    svo_mode_val = svo_path.perform(context) != 'live'
+    local_svo = svo_path.perform(context) != 'live'
+    svo_mode_val = local_svo or stream_svo_mode
     future_path_val = future_path.perform(context).lower() == 'true'
     mavlink_val = mavlink.perform(context).lower() == 'true'
 
+    if stream_address:
+        try:
+            port = int(stream_port)
+            if not 2 <= port <= 65534 or port % 2:
+                raise ValueError
+        except ValueError:
+            return _stop_launch('stream_port must be even and in [2, 65534].')
+        if local_svo:
+            return _stop_launch('stream_address and a local svo_path are mutually exclusive.')
+        if publish_svo_clock.perform(context).lower() == 'true':
+            return _stop_launch(
+                'NET input uses the source /clock; set publish_svo_clock:=false on the receiver.'
+            )
+        if stream_svo_mode and use_sim_time_val != 'true':
+            return _stop_launch('stream_svo_mode:=true requires use_sim_time:=true (or auto).')
+        if future_path_val and not mavlink_val:
+            return _stop_launch('NET future_path requires mavlink:=true; no local SVO VIO cache.')
+    elif stream_svo_mode:
+        return _stop_launch('stream_svo_mode:=true requires stream_address.')
+
     if mavlink_val and not svo_mode_val:
         return _stop_launch('mavlink:=true requires an SVO file; live mode is unsupported.')
-    if mavlink_val and publish_svo_clock.perform(context).lower() != 'true':
-        return _stop_launch('mavlink:=true requires publish_svo_clock:=true.')
+    if mavlink_val and (use_sim_time_val != 'true' or (
+        not stream_address and publish_svo_clock.perform(context).lower() != 'true'
+    )):
+        return _stop_launch(
+            'mavlink:=true requires publish_svo_clock:=true for local SVO '
+            'or stream_svo_mode:=true for NET, with use_sim_time:=true.'
+        )
 
     mavlink_match_tolerance_val = 60.0
     mavlink_max_gps_gap_val = 1.5
@@ -290,8 +326,9 @@ def launch_setup(context, *args, **kwargs):
         arguments=[['-d'], [config_rviz2]],
         parameters=[
             {
-                'use_sim_time': publish_svo_clock,
+                'use_sim_time': use_sim_time,
                 'svo_mode': svo_mode_val,
+                'svo_control_namespace': LaunchConfiguration('svo_control_namespace', default=''),
             }
         ],
         remappings=rviz_remappings,
@@ -307,9 +344,16 @@ def launch_setup(context, *args, **kwargs):
             'camera_name': camera_name_val,
             'camera_model': camera_model_val,
             'svo_path': svo_path,
+            'stream_address': stream_address,
+            'stream_port': stream_port,
             'param_overrides': [
                 TextSubstitution(text='svo.svo_realtime:='),
                 svo_realtime,
+                TextSubstitution(text=';debug.use_pub_timestamps:=false'),
+                # NET provides image-synchronized samples, not a local sensor FIFO.
+                TextSubstitution(
+                    text=';sensors.sensors_image_sync:=true' if stream_address else ''
+                ),
                 TextSubstitution(
                     text=(
                         ';pos_tracking.pos_tracking_enabled:=false;' 'depth.depth_stabilization:=0'
@@ -318,14 +362,14 @@ def launch_setup(context, *args, **kwargs):
                     )
                 ),
             ],
-            'publish_svo_clock': publish_svo_clock,
+            'publish_svo_clock': 'false' if stream_address else publish_svo_clock,
             'publish_tf': 'false' if mavlink_val else 'true',
             'publish_map_tf': 'false' if mavlink_val else 'true',
             # The ZED component is the /clock producer in SVO playback.  It
             # must not use simulated time itself: the wrapper waits for a
             # /clock message before grabbing, which would deadlock a clock
-            # producer.  All consumers below use publish_svo_clock as their
-            # use_sim_time value instead.
+            # producer. NET input also grabs independently of /clock, keeping
+            # source IMAGE timestamps. Only consumers use simulated time.
             'use_sim_time': 'false',
         }.items(),
         condition=IfCondition(start_zed_node),
@@ -343,6 +387,7 @@ def launch_setup(context, *args, **kwargs):
                 {
                     'mavlink_dir': mavlink_dir.perform(context),
                     'mavlink_db_path': mavlink_db_path.perform(context),
+                    'match_session_start': not bool(stream_address),
                     'pose_topic': mavlink_pose_topic.perform(context),
                     'future_path_enabled': future_path_val,
                     'future_path_topic': future_path_topic.perform(context),
@@ -387,7 +432,7 @@ def launch_setup(context, *args, **kwargs):
                     'terrain_params_file': terrain_params_file,
                     'trajectory_topic': future_path_topic,
                     'map_frame': map_frame,
-                    'use_sim_time': publish_svo_clock,
+                    'use_sim_time': use_sim_time,
                 }.items(),
                 condition=IfCondition(start_terrain_node),
             )
@@ -406,7 +451,7 @@ def launch_setup(context, *args, **kwargs):
                     'model_path': segmentation_model_path,
                     'box_frame': map_frame,
                     'box_up_axis': '[0.0, 0.0, 1.0]',
-                    'use_sim_time': publish_svo_clock,
+                    'use_sim_time': use_sim_time,
                 }.items(),
                 condition=IfCondition(TextSubstitution(text=start_segmentation_val)),
             )
@@ -435,7 +480,7 @@ def launch_setup(context, *args, **kwargs):
                     'objects_input_type': 'tracked_objects',
                     'pose_topic': mavlink_pose_topic,
                     'map_frame': map_frame,
-                    'use_sim_time': publish_svo_clock,
+                    'use_sim_time': use_sim_time,
                 }.items(),
                 condition=IfCondition(TextSubstitution(text=start_prediction_val)),
             )
@@ -488,7 +533,7 @@ def launch_setup(context, *args, **kwargs):
                 'max_gap_s': 1.0,
                 'max_points': 1000,
                 **future_path_processing,
-                'use_sim_time': publish_svo_clock,
+                'use_sim_time': use_sim_time,
             }
         ],
     )
@@ -613,6 +658,26 @@ def generate_launch_description(
                     'skipping frames if needed.'
                 ),
                 choices=['true', 'false'],
+            ),
+            DeclareLaunchArgument(
+                'stream_address', default_value='',
+                description='ZED NET sender IP. Keep svo_path:=live on the receiver.',
+            ),
+            DeclareLaunchArgument(
+                'stream_port', default_value='30000',
+                description='ZED NET sender port (even).',
+            ),
+            DeclareLaunchArgument(
+                'stream_svo_mode', default_value='false', choices=['true', 'false'],
+                description='The NET sender replays SVO and owns /clock; enable simulated time.',
+            ),
+            DeclareLaunchArgument(
+                'use_sim_time', default_value='auto', choices=['auto', 'true', 'false'],
+                description='Consumer clock: auto follows stream_svo_mode or publish_svo_clock.',
+            ),
+            DeclareLaunchArgument(
+                'svo_control_namespace', default_value='',
+                description='SVO control node, e.g. /zed_source/zed_node. Empty uses this camera.',
             ),
             DeclareLaunchArgument(
                 'publish_svo_clock',

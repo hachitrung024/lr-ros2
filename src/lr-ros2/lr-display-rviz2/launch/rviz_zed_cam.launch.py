@@ -91,6 +91,9 @@ def launch_setup(context, *args, **kwargs):
                 {
                     'use_sim_time': LaunchConfiguration('use_sim_time'),
                     'svo_mode': LaunchConfiguration('svo_mode'),
+                    'svo_control_namespace': LaunchConfiguration(
+                        'svo_control_namespace', default=''
+                    ),
                 }
             ],
             remappings=remappings,
@@ -123,6 +126,11 @@ def generate_launch_description():
                 default_value='false',
                 choices=['true', 'false'],
                 description='Show the remote SVO playback controls.',
+            ),
+            DeclareLaunchArgument(
+                'svo_control_namespace',
+                default_value='',
+                description='SVO source node, e.g. /zed_source/zed_node. Empty uses this camera.',
             ),
             DeclareLaunchArgument(
                 'segmentation_enabled',

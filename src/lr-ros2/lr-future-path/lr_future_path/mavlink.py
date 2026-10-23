@@ -357,8 +357,9 @@ def select_session(
     directory: str | Path = "mavlink",
     explicit_path: str | Path = "",
     tolerance_ns: int = 60 * NANOSECONDS_PER_SECOND,
+    require_start_match: bool = True,
 ) -> SessionSummary:
-    """Select the unique session whose start and coverage match SVO time."""
+    """Match session start, or time coverage when joining a running NET replay."""
     if tolerance_ns < 0:
         raise ValueError("tolerance_ns must not be negative")
     if str(explicit_path).strip():
@@ -371,7 +372,7 @@ def select_session(
         if summary.start_ns - tolerance_ns
         <= clock_stamp_ns
         <= summary.end_ns + tolerance_ns
-        and abs(clock_stamp_ns - summary.start_ns) <= tolerance_ns
+        and (not require_start_match or abs(clock_stamp_ns - summary.start_ns) <= tolerance_ns)
     ]
     if not matching:
         locations = ", ".join(str(item.path) for item in candidates)

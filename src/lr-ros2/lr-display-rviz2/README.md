@@ -8,7 +8,21 @@ The display pipeline includes the segmentation and terrain packages' shared
 launch files. Explicit display camera/frame/time parameters override their
 YAML files. The SVO panel times out unanswered pause/seek requests after
 3 seconds, cleans up the pending ROS request, and allows a retry. Pausing
-realtime SVO playback still requires the wrapper's realtime-pause patch.
+realtime **direct-file** SVO playback still requires the wrapper's realtime-pause
+patch. The `lr_zed_stream` host source implements its own serialized playback
+controls and does not require that patch.
+Its pause/seek services are experimental (`enable_svo_controls:=true`): NET
+pause/seek has not passed SDK 5.4.1 hardware acceptance. The supported NET
+workflow uses sequential playback and hides the SVO panel with `svo_mode:=false`.
+
+For ZED NET input, pass `stream_address:=10.42.0.1 stream_port:=30000` to the
+headless launch. Add `stream_svo_mode:=true` for a remote SVO source: LR consumers
+then use the source `/clock`, while the receiver keeps
+`publish_svo_clock:=false` and `svo_path:=live`. `use_sim_time:=auto` preserves
+the old direct-file defaults. NET future path uses `mavlink:=true`.
+On the RViz host, set `svo_control_namespace:=/zed_source/zed_node` to select
+the source controls independently of the Jetson camera namespace. An empty
+control namespace preserves the original camera-local services.
 
 **Note:** The main package [zed-ros2-wrapper](https://github.com/stereolabs/zed-ros2-wrapper)
 is required to correctly execute the ROS node to acquire data from a Stereolabs 3D camera.

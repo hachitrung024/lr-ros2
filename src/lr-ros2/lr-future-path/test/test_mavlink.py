@@ -145,6 +145,24 @@ def test_session_selection_rejects_no_match_and_ambiguity(tmp_path):
         )
 
 
+def test_session_selection_can_join_net_replay_mid_session(tmp_path):
+    """NET can start after the session-start tolerance while inside its coverage."""
+    database = tmp_path / 'session_mavlink.db'
+    _create_database(database)
+    with pytest.raises(MavlinkDataError, match='No MAVLink session'):
+        select_session(1_800_000_000, directory=tmp_path, tolerance_ns=100_000_000)
+    selected = select_session(
+        1_800_000_000, directory=tmp_path, tolerance_ns=100_000_000,
+        require_start_match=False,
+    )
+    assert selected.path == database.resolve()
+    with pytest.raises(MavlinkDataError, match='No MAVLink session'):
+        select_session(
+            100 * SECOND, directory=tmp_path, tolerance_ns=100_000_000,
+            require_start_match=False,
+        )
+
+
 def test_session_inspection_rejects_rosbag_or_wrong_schema(tmp_path):
     """A generic SQLite database is not accepted as MAVLink telemetry."""
     database = tmp_path / "session_mavlink.db"
