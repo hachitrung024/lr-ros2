@@ -74,6 +74,7 @@ class MavlinkTrajectory:
     attitude_stamps_ns: np.ndarray
     attitude_orientations_xyzw: np.ndarray
     gps_speeds_mps: np.ndarray | None = None
+    origin_lla: np.ndarray | None = None
 
     def __post_init__(self) -> None:
         """Validate trajectory shapes and strict timestamp ordering."""
@@ -471,6 +472,7 @@ def load_trajectory(path: str | Path) -> MavlinkTrajectory:
         attitude_stamps_ns=attitude_stamps,
         attitude_orientations_xyzw=attitude_orientations,
         gps_speeds_mps=gps_speeds,
+        origin_lla=geodetic[0].copy(),
     )
 
 

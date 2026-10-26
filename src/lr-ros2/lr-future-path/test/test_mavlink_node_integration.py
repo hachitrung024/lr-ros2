@@ -1,27 +1,27 @@
-"""ROS integration tests for the MAVLink pose/TF/path publisher."""
+"""ROS integration checks for reference-only DB output in the NET architecture."""
 
 from pathlib import Path
 import time
 
-from geometry_msgs.msg import PoseStamped
+from geographic_msgs.msg import GeoPointStamped
 from nav_msgs.msg import Path as PathMessage
 import numpy as np
 import pytest
 import rclpy
 from rclpy.executors import SingleThreadedExecutor
 from rclpy.parameter import Parameter
-from rclpy.qos import qos_profile_sensor_data
+from rclpy.qos import DurabilityPolicy, QoSProfile
 from rosgraph_msgs.msg import Clock
-from tf2_msgs.msg import TFMessage
 
 from lr_future_path.mavlink import MavlinkTrajectory
-from lr_future_path.mavlink_pose_node import MavlinkPoseNode
+from lr_future_path.mavlink_ground_truth_node import MavlinkGroundTruthNode
 
 
 SECOND = 1_000_000_000
 
 
-def _spin_until(executor, predicate, timeout=4.0):
+def spin_until(executor, predicate, timeout=4.0):
+    """Wait for DDS discovery and delivery without changing recorded time."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         executor.spin_once(timeout_sec=0.03)
@@ -32,7 +32,7 @@ def _spin_until(executor, predicate, timeout=4.0):
 
 @pytest.fixture
 def ros_context():
-    """Provide a clean rclpy context for the integration test."""
+    """Provide an isolated ROS context."""
     rclpy.init()
     try:
         yield
@@ -41,93 +41,76 @@ def ros_context():
             rclpy.shutdown()
 
 
-def _trajectory():
-    stamps = np.asarray(
-        [10 * SECOND, 11 * SECOND, 12 * SECOND], dtype=np.int64
-    )
+def trajectory():
+    """Create reference motion with a fixed ENU origin, independent of the estimator."""
+    stamps = np.array([10, 11, 12], dtype=np.int64) * SECOND
     return MavlinkTrajectory(
-        path=Path("injected.db"),
-        gps_stamps_ns=stamps,
-        gps_positions=np.asarray(
-            [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]]
-        ),
+        path=Path('injected.db'), gps_stamps_ns=stamps,
+        gps_positions=np.array([[0., 0., 0.], [1., 0., 0.], [2., 0., 0.]]),
         attitude_stamps_ns=stamps,
-        attitude_orientations_xyzw=np.tile(
-            np.array([0.0, 0.0, 0.0, 1.0]), (3, 1)
-        ),
+        attitude_orientations_xyzw=np.tile([0., 0., 0., 1.], (3, 1)),
+        origin_lla=np.array([34.2, -118.3, 506.45]),
     )
 
 
-def _clock(seconds: int, nanoseconds: int = 0) -> Clock:
+def clock(seconds, nanoseconds=0):
+    """Build a recorded clock frame."""
     message = Clock()
     message.clock.sec = seconds
     message.clock.nanosec = nanoseconds
     return message
 
 
-def test_clock_publishes_pose_tf_path_and_supports_backward_seek(ros_context):
-    """One SVO clock drives all outputs and a backward seek is stateless."""
-    node = MavlinkPoseNode(
-        trajectory=_trajectory(),
-        parameter_overrides=[
-            Parameter("pose_topic", value="/test/mavlink_pose"),
-            Parameter("future_path_enabled", value=True),
-            Parameter("future_path_topic", value="/test/future_path"),
-            Parameter("map_frame", value="test_map"),
-            Parameter("child_frame", value="test_camera_link"),
-            Parameter("max_gps_gap_s", value=2.0),
-            Parameter("step_m", value=0.2),
-        ],
-    )
-    driver = rclpy.create_node("mavlink_pose_test_driver")
+def test_ground_truth_publishes_latched_origin_path_and_handles_rewind_without_pose(ros_context):
+    """Only MAVROS may own camera pose/TF; the DB remains an offline reference."""
+    node = MavlinkGroundTruthNode(trajectory=trajectory(), parameter_overrides=[
+        Parameter('use_sim_time', value=True), Parameter('future_path_enabled', value=True),
+        Parameter('future_path_topic', value='/test/future_path'),
+        Parameter('map_frame', value='test_map'), Parameter('max_gps_gap_s', value=2.0),
+    ])
+    driver = rclpy.create_node('reference_test_driver')
     executor = SingleThreadedExecutor()
     executor.add_node(node)
     executor.add_node(driver)
-    clock_publisher = driver.create_publisher(Clock, "/clock", 10)
-    poses = []
-    paths = []
-    transforms = []
-    driver.create_subscription(
-        PoseStamped, "/test/mavlink_pose", poses.append, 10
-    )
-    driver.create_subscription(
-        PathMessage, "/test/future_path", paths.append, 10
-    )
-    driver.create_subscription(
-        TFMessage, "/tf", transforms.append, qos_profile_sensor_data
-    )
-
+    publisher = driver.create_publisher(Clock, '/clock', 10)
+    paths, origins = [], []
+    driver.create_subscription(PathMessage, '/test/future_path', paths.append,
+                               QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
+    driver.create_subscription(GeoPointStamped, '/lr/mavlink/origin', origins.append,
+                               QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
     try:
-        assert _spin_until(
-            executor, lambda: clock_publisher.get_subscription_count() > 0
-        )
-        clock_publisher.publish(_clock(10, 500_000_000))
-        assert _spin_until(
-            executor,
-            lambda: bool(poses) and bool(paths) and bool(transforms),
-        )
-
-        assert poses[-1].header.frame_id == "test_map"
-        assert poses[-1].pose.position.x == pytest.approx(0.5)
-        assert paths[-1].poses[0].pose.position.x == pytest.approx(0.5)
-        assert paths[-1].poses[-1].pose.position.x == pytest.approx(2.0)
-        transform = transforms[-1].transforms[-1]
-        assert transform.header.frame_id == "test_map"
-        assert transform.child_frame_id == "test_camera_link"
-        assert transform.transform.translation.x == pytest.approx(0.5)
-
-        pose_count = len(poses)
-        clock_publisher.publish(_clock(20))
-        for _ in range(5):
-            executor.spin_once(timeout_sec=0.03)
-        assert len(poses) == pose_count
-
-        clock_publisher.publish(_clock(10, 250_000_000))
-        assert _spin_until(executor, lambda: len(poses) > pose_count)
-        assert poses[-1].pose.position.x == pytest.approx(0.25)
+        assert spin_until(executor, lambda: bool(origins)
+                          and publisher.get_subscription_count() > 0)
+        assert origins[0].header.frame_id == 'test_map'
+        assert origins[0].position.altitude == pytest.approx(506.45)
+        publisher.publish(clock(10, 500_000_000))
+        assert spin_until(executor, lambda: bool(paths) and bool(paths[-1].poses))
+        assert paths[-1].poses[0].pose.position.x == pytest.approx(.5)
+        assert paths[-1].poses[-1].pose.position.x == pytest.approx(2.)
+        publisher.publish(clock(10, 250_000_000))
+        assert spin_until(executor, lambda: bool(paths[-1].poses)
+                          and paths[-1].header.stamp.nanosec == 250_000_000)
+        assert paths[-1].poses[0].pose.position.x == pytest.approx(.25)
+        topics = {name for name, _ in driver.get_publisher_names_and_types_by_node(
+            node.get_name(), node.get_namespace())}
+        assert '/lr/mavlink/pose' not in topics
+        assert '/tf' not in topics
+        assert '/tf_static' not in topics
     finally:
         executor.remove_node(node)
         executor.remove_node(driver)
         node.destroy_node()
         driver.destroy_node()
         executor.shutdown()
+
+
+def test_origin_is_available_when_future_path_is_disabled(ros_context):
+    """Pose initialization still has its fixed origin without enabling a reference path."""
+    node = MavlinkGroundTruthNode(trajectory=trajectory())
+    try:
+        assert node._future_publisher is None
+        node._clock_callback(clock(10, 500_000_000))
+        assert not hasattr(node, '_pose_publisher')
+        assert not hasattr(node, '_tf_broadcaster')
+    finally:
+        node.destroy_node()

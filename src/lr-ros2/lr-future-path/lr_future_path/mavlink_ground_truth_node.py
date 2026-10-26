@@ -1,4 +1,4 @@
-"""Publish offline MAVLink pose, TF, and optional future ground truth."""
+"""Publish the fixed ENU origin and DB reference path, without pose or TF."""
 
 from __future__ import annotations
 
@@ -8,21 +8,22 @@ import sys
 import time
 from typing import Callable
 
-from geometry_msgs.msg import PoseStamped, TransformStamped
+from geographic_msgs.msg import GeoPointStamped
+from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import Path as PathMessage
 import numpy as np
 import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import (
+    DurabilityPolicy,
     HistoryPolicy,
     QoSProfile,
     ReliabilityPolicy,
 )
 from rosgraph_msgs.msg import Clock
-from tf2_ros import TransformBroadcaster
 
-from .bag_io import nanoseconds_to_stamp
+from .time_utils import nanoseconds_to_stamp
 from .mavlink import (
     MavlinkDataError,
     MavlinkTrajectory,
@@ -35,8 +36,8 @@ from .mavlink import (
 from .path_output import PathOutput
 
 
-class MavlinkPoseNode(Node):
-    """Drive the ZED camera frame from a timestamped MAVLink SQLite log."""
+class MavlinkGroundTruthNode(Node):
+    """Keep DB ground truth independent of the received-telemetry pose estimator."""
 
     def __init__(
         self,
@@ -49,20 +50,16 @@ class MavlinkPoseNode(Node):
         **node_kwargs,
     ) -> None:
         """Configure session matching and ROS outputs."""
-        super().__init__("mavlink_pose", **node_kwargs)
+        super().__init__("mavlink_ground_truth", **node_kwargs)
+        self._origin_publisher = self.create_publisher(
+            GeoPointStamped, "/lr/mavlink/origin",
+            QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL),
+        )
         self._mavlink_dir = str(
             self.declare_parameter("mavlink_dir", "mavlink").value
         )
         self._database_path = str(
             self.declare_parameter("mavlink_db_path", "").value
-        )
-        self._match_session_start = bool(
-            self.declare_parameter("match_session_start", True).value
-        )
-        pose_topic = str(
-            self.declare_parameter(
-                "pose_topic", "/lr/mavlink/pose"
-            ).value
         )
         self._future_enabled = bool(
             self.declare_parameter("future_path_enabled", False).value
@@ -75,14 +72,6 @@ class MavlinkPoseNode(Node):
         self._map_frame = str(
             self.declare_parameter("map_frame", "map").value
         ).strip()
-        self._child_frame = str(
-            self.declare_parameter(
-                "child_frame", "zed_camera_link"
-            ).value
-        ).strip()
-        match_tolerance_s = float(
-            self.declare_parameter("match_tolerance_s", 60.0).value
-        )
         max_gps_gap_s = float(
             self.declare_parameter("max_gps_gap_s", 1.5).value
         )
@@ -110,11 +99,10 @@ class MavlinkPoseNode(Node):
             ).value,
             dtype=np.float64,
         )
-        if not self._map_frame or not self._child_frame:
-            raise ValueError("map_frame and child_frame must not be empty")
-        if match_tolerance_s < 0.0 or max_gps_gap_s <= 0.0:
+        if not self._map_frame:
+            raise ValueError("map_frame must not be empty")
+        if not math.isfinite(max_gps_gap_s) or max_gps_gap_s <= 0.0:
             raise ValueError(
-                "match_tolerance_s must be non-negative and "
                 "max_gps_gap_s must be positive"
             )
         if not all(
@@ -141,9 +129,6 @@ class MavlinkPoseNode(Node):
                 "body_to_camera must contain six finite XYZ/RPY values"
             )
 
-        self._match_tolerance_ns = int(
-            round(match_tolerance_s * 1_000_000_000)
-        )
         self._max_gps_gap_ns = int(
             round(max_gps_gap_s * 1_000_000_000)
         )
@@ -155,18 +140,10 @@ class MavlinkPoseNode(Node):
         self._fatal_error: str | None = None
         self._last_gap_warning_time = 0.0
 
-        output_qos = QoSProfile(
-            history=HistoryPolicy.KEEP_LAST,
-            depth=10,
-            reliability=ReliabilityPolicy.RELIABLE,
-        )
         clock_qos = QoSProfile(
             history=HistoryPolicy.KEEP_LAST,
             depth=1,
             reliability=ReliabilityPolicy.BEST_EFFORT,
-        )
-        self._pose_publisher = self.create_publisher(
-            PoseStamped, pose_topic, output_qos
         )
         self._future_publisher = (
             PathOutput(self, future_topic, radius_m=self._radius_m, step_m=self._step_m,
@@ -174,7 +151,6 @@ class MavlinkPoseNode(Node):
             if self._future_enabled
             else None
         )
-        self._tf_broadcaster = TransformBroadcaster(self)
         self._clock_subscription = self.create_subscription(
             Clock, "/clock", self._clock_callback, clock_qos
         )
@@ -187,13 +163,8 @@ class MavlinkPoseNode(Node):
                 f"{source}"
             )
         self.get_logger().info(
-            "MAVLink pose output: frame=%s child=%s pose=%s future=%s"
-            % (
-                self._map_frame,
-                self._child_frame,
-                pose_topic,
-                "enabled" if self._future_enabled else "disabled",
-            )
+            f"Ground-truth reference: frame={self._map_frame}; "
+            f"future path={'enabled' if self._future_enabled else 'disabled'}"
         )
 
     @property
@@ -207,8 +178,7 @@ class MavlinkPoseNode(Node):
                 stamp_ns,
                 directory=self._mavlink_dir,
                 explicit_path=self._database_path,
-                tolerance_ns=self._match_tolerance_ns,
-                require_start_match=self._match_session_start,
+                require_start_match=False,
             )
             self._trajectory = self._trajectory_loader(summary.path)
         except (MavlinkDataError, OSError, ValueError) as exception:
@@ -220,6 +190,15 @@ class MavlinkPoseNode(Node):
     def _log_selected_trajectory(
         self, trajectory: MavlinkTrajectory
     ) -> None:
+        if trajectory.origin_lla is None:
+            raise MavlinkDataError("Ground-truth recording has no ENU origin")
+        if trajectory.origin_lla is not None:
+            origin = GeoPointStamped()
+            origin.header.frame_id = self._map_frame
+            origin.position.latitude, origin.position.longitude, origin.position.altitude = (
+                trajectory.origin_lla.tolist()
+            )
+            self._origin_publisher.publish(origin)
         self.get_logger().info(
             "Selected MAVLink session: %s (%d GPS, %d attitude samples)"
             % (
@@ -233,7 +212,7 @@ class MavlinkPoseNode(Node):
         if self._fatal_error is not None:
             return
         self._fatal_error = message
-        self.get_logger().fatal(f"MAVLink pose node failed: {message}")
+        self.get_logger().fatal(f"Ground-truth node failed: {message}")
 
     def _warn_gap(self, stamp_ns: int) -> None:
         now = time.monotonic()
@@ -242,7 +221,7 @@ class MavlinkPoseNode(Node):
         self._last_gap_warning_time = now
         self.get_logger().warning(
             "No valid MAVLink GPS interpolation at %.9f; suppressing "
-            "pose, TF, and future path"
+            "future path"
             % (stamp_ns / 1e9)
         )
 
@@ -257,6 +236,8 @@ class MavlinkPoseNode(Node):
             stamp_ns
         ):
             return
+        if not self._future_enabled:
+            return
         body_pose = self._trajectory.pose_at(
             stamp_ns,
             max_gps_gap_ns=self._max_gps_gap_ns,
@@ -265,11 +246,6 @@ class MavlinkPoseNode(Node):
         if body_pose is None:
             self._warn_gap(stamp_ns)
             return
-        camera_pose = apply_body_to_camera(
-            body_pose, self._body_to_camera
-        )
-        self._pose_publisher.publish(self._pose_message(camera_pose))
-        self._tf_broadcaster.sendTransform(self._transform(camera_pose))
         if self._future_publisher is not None:
             samples = self._trajectory.future_samples(
                 stamp_ns,
@@ -287,27 +263,6 @@ class MavlinkPoseNode(Node):
                 self._future_publisher.publish(
                     self._path_message(samples)
                 )
-
-    def _pose_message(self, sample: PoseSample) -> PoseStamped:
-        message = PoseStamped()
-        message.header.frame_id = self._map_frame
-        nanoseconds_to_stamp(sample.stamp_ns, message.header.stamp)
-        self._copy_pose(sample, message)
-        return message
-
-    def _transform(self, sample: PoseSample) -> TransformStamped:
-        message = TransformStamped()
-        message.header.frame_id = self._map_frame
-        message.child_frame_id = self._child_frame
-        nanoseconds_to_stamp(sample.stamp_ns, message.header.stamp)
-        message.transform.translation.x = float(sample.position[0])
-        message.transform.translation.y = float(sample.position[1])
-        message.transform.translation.z = float(sample.position[2])
-        message.transform.rotation.x = float(sample.orientation_xyzw[0])
-        message.transform.rotation.y = float(sample.orientation_xyzw[1])
-        message.transform.rotation.z = float(sample.orientation_xyzw[2])
-        message.transform.rotation.w = float(sample.orientation_xyzw[3])
-        return message
 
     def _path_message(self, samples: list[PoseSample]) -> PathMessage:
         message = PathMessage()
@@ -336,12 +291,12 @@ class MavlinkPoseNode(Node):
 
 
 def main(args=None) -> None:
-    """Run the MAVLink pose and TF publisher."""
+    """Run the reference-only process without any pose or TF publisher."""
     rclpy.init(args=args)
     node = None
     exit_code = 0
     try:
-        node = MavlinkPoseNode()
+        node = MavlinkGroundTruthNode()
         while rclpy.ok() and node.fatal_error is None:
             rclpy.spin_once(node, timeout_sec=0.1)
         if node.fatal_error is not None:
@@ -350,7 +305,7 @@ def main(args=None) -> None:
         if node is not None and node.fatal_error is not None:
             exit_code = 1
     except Exception as exception:  # Ensure launch sees initialization errors.
-        print(f"MAVLink pose node failed: {exception}", file=sys.stderr)
+        print(f"Ground-truth node failed: {exception}", file=sys.stderr)
         exit_code = 1
     finally:
         if node is not None:

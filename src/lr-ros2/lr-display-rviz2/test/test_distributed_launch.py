@@ -39,21 +39,15 @@ def _text(context, value):
     return perform_substitutions(context, normalize_to_list_of_substitutions(value))
 
 
-def test_headless_entry_point_locks_rviz_off():
-    """The deploy entry point cannot accidentally start a GUI process."""
+def test_headless_entry_point_has_only_net_arguments_and_no_ui():
+    """Backend launch cannot open a local file/camera or start RViz."""
     module = _load('headless_zed_cam.launch.py')
-    description = module.generate_launch_description()
-    declaration = next(
-        entity
-        for entity in description.entities
-        if isinstance(entity, DeclareLaunchArgument) and entity.name == 'start_rviz'
-    )
-    context = LaunchContext()
-
-    declaration.execute(context)
-
-    assert context.launch_configurations['start_rviz'] == 'false'
-    assert declaration.choices == ['false']
+    declarations = {e.name: e for e in module.generate_launch_description().entities
+                    if isinstance(e, DeclareLaunchArgument)}
+    for name in ('stream_address', 'stream_port', 'stream_svo_mode'):
+        assert declarations[name].default_value is None
+    for name in ('start_rviz', 'svo_path', 'mavlink', 'mavlink_backend', 'publish_svo_clock'):
+        assert name not in declarations
 
 
 def test_rviz_entry_point_starts_only_rviz_and_uses_remote_clock():

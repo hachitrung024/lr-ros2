@@ -51,6 +51,9 @@ apt-get update
 apt-get install -y --no-install-recommends \
   qtbase5-dev \
   libopenblas-dev \
+  libgeographic-dev \
+  geographiclib-tools \
+  "ros-${ROS_DISTRO}-mavros" \
   libopenmpi-dev \
   libomp-dev \
   python3-numpy \
@@ -81,7 +84,6 @@ apt-get install -y --no-install-recommends \
   "ros-${ROS_DISTRO}-rclcpp" \
   "ros-${ROS_DISTRO}-rclpy" \
   "ros-${ROS_DISTRO}-robot-state-publisher" \
-  "ros-${ROS_DISTRO}-rosbag2-py" \
   "ros-${ROS_DISTRO}-rosgraph-msgs" \
   "ros-${ROS_DISTRO}-rosidl-default-generators" \
   "ros-${ROS_DISTRO}-rosidl-default-runtime" \
@@ -95,6 +97,8 @@ apt-get install -y --no-install-recommends \
   "ros-${ROS_DISTRO}-tf2-ros" \
   "ros-${ROS_DISTRO}-vision-msgs" \
   "ros-${ROS_DISTRO}-visualization-msgs"
+
+geographiclib-get-geoids egm96-5
 
 rosdep update --rosdistro "${ROS_DISTRO}"
 
@@ -112,7 +116,7 @@ if [ "${LR_PLATFORM}" = "jetson" ]; then
     "${TORCHVISION_SPEC}"
 fi
 python3 -m pip install "${PIP_ARGS[@]}" \
-  -r "${REQUIREMENTS_FILE}"
+  -r "${REQUIREMENTS_FILE}" "pymavlink>=2.4.49,<3"
 
 echo ">>> Verifying LR build/runtime dependencies"
 python3 - "${LR_PLATFORM}" <<'PY'

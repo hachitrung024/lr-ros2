@@ -1,0 +1,12 @@
+2026-09-30T20:49:31.395155+00:00 [INFO] [mavlink] Session recorder initialized: /mnt/media_pool/drive1/session_20260930_1349_mavlink
+2026-09-30T20:49:31.395855+00:00 [INFO] [MAVLink Logger] Starting recording
+2026-09-30T20:49:31.495775+00:00 [INFO] [MAVLink Logger] Wrote meta.json to /mnt/media_pool/drive1/session_20260930_1349_mavlink
+2026-09-30T20:49:31.497121+00:00 [INFO] [MAVLink Logger] Recording started: /mnt/media_pool/drive1/session_20260930_1349_mavlink/session_mavlink.db
+2026-09-30T20:56:02.254809+00:00 [ERROR] [MAVLink Logger] WARNING: Extra queue full — dropped 1 samples total
+2026-09-30T21:09:27.903195+00:00 [ERROR] [MAVLink Logger] WARNING: Extra queue full — dropped 1000 samples total
+2026-09-30T21:45:56.310734+00:00 [ERROR] [MAVLink Logger] WARNING: Extra queue full — dropped 2000 samples total
+2026-09-30T22:12:23.943882+00:00 [ERROR] [MAVLink Logger] WARNING: Extra queue full — dropped 3000 samples total
+2026-09-30T22:41:29.517644+00:00 [ERROR] [MAVLink Logger] WARNING: Extra queue full — dropped 4000 samples total
+2026-09-30T22:45:31.430305+00:00 [ERROR] [MAVLink Logger] WARNING: IMU queue full — dropped 1 samples total
+2026-09-30T22:45:39.350739+00:00 [ERROR] [MAVLink Logger] WARNING: Extra queue full — dropped 5000 samples total
+2026-09-30T23:22:04.697728+00:00 [INFO] [MAVLink Logger] Recording stopped. Total samples queued this session: 809097

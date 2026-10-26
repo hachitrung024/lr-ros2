@@ -192,10 +192,12 @@ def live(args, parameters):
     executor.add_node(node)
     command = [
         'ros2', 'launch', 'lr_display_rviz2', 'headless_zed_cam.launch.py',
-        'camera_model:=zed2i', 'publish_svo_clock:=true', 'mavlink:=true',
-        'mavlink_dir:=/zed/lr-ros2/mavlink', 'future_path:=true',
-        f'segmentation_model_path:={args.model}', f'svo_path:={args.svo}',
-        'start_terrain_node:=false', 'start_path_prediction_node:=true',
+        'camera_model:=zed2i', 'stream_svo_mode:=true',
+        f'stream_address:={args.stream_address}', f'stream_port:={args.stream_port}',
+        f'mavros_fcu_url:={args.mavros_fcu_url}',
+        f'mavlink_db_path:={args.mavlink_db_path}', 'future_path:=true',
+        f'segmentation_model_path:={args.model}',
+        'start_terrain_node:=false', 'start_path_prediction_node:=false',
     ]
     own_process = psutil.Process()
     process_cache = {own_process.pid: own_process}
@@ -275,13 +277,19 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--replay', type=Path)
     parser.add_argument('--capture', type=Path)
-    parser.add_argument('--svo', default='/zed/svo/zed_20260710_092420_0001.svo2')
+    parser.add_argument('--stream-address')
+    parser.add_argument('--stream-port', type=int)
+    parser.add_argument('--mavros-fcu-url')
+    parser.add_argument('--mavlink-db-path', default='')
     parser.add_argument('--model', default='/zed/lr-ros2/models/best.pt')
     parser.add_argument('--warmup', type=float, default=5)
     parser.add_argument('--duration', type=float, default=30)
     parser.add_argument('--timeout', type=float, default=180)
     parser.add_argument('--blas-threads', type=int)
     args = parser.parse_args()
+    if not args.replay and not all((args.stream_address, args.stream_port, args.mavros_fcu_url)):
+        parser.error('NET measurement requires --stream-address, --stream-port '
+                     'and --mavros-fcu-url')
     args.pipeline_environment = os.environ.copy()
     if args.blas_threads is not None:
         if args.blas_threads < 1:

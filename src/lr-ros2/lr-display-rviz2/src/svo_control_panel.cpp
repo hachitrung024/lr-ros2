@@ -126,13 +126,14 @@ void SvoControlPanel::onInitialize()
   if (node_->has_parameter("svo_control_namespace")) {
     control_namespace = node_->get_parameter("svo_control_namespace").as_string();
   } else {
-    control_namespace = node_->declare_parameter<std::string>("svo_control_namespace", "");
+    control_namespace =
+      node_->declare_parameter<std::string>("svo_control_namespace", "/zed_source/zed_node");
   }
   while (!control_namespace.empty() && control_namespace.back() == '/') {
     control_namespace.pop_back();
   }
   if (control_namespace.empty()) {
-    control_namespace = "zed_node";
+    control_namespace = "/zed_source/zed_node";
   }
   status_subscription_ = node_->create_subscription<zed_msgs::msg::SvoStatus>(
     control_namespace + "/status/svo", rclcpp::QoS(10),

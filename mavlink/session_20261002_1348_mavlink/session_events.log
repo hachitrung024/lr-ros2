@@ -1,0 +1,6 @@
+2026-10-02T20:48:42.563874+00:00 [INFO] [mavlink] Session recorder initialized: /mnt/media_pool/drive1/session_20261002_1348_mavlink
+2026-10-02T20:48:42.564598+00:00 [INFO] [MAVLink Logger] Starting recording
+2026-10-02T20:48:42.690281+00:00 [INFO] [MAVLink Logger] Wrote meta.json to /mnt/media_pool/drive1/session_20261002_1348_mavlink
+2026-10-02T20:48:42.691585+00:00 [INFO] [MAVLink Logger] Recording started: /mnt/media_pool/drive1/session_20261002_1348_mavlink/session_mavlink.db
+2026-10-02T21:47:06.238937+00:00 [CRITICAL] [MAVLink Recorder] No new MAVLink data for 120s despite state=CONNECTED — restarting process
+2026-10-02T21:47:09.181991+00:00 [INFO] [MAVLink Logger] Recording stopped. Total samples queued this session: 304530

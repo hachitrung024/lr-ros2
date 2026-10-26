@@ -1,0 +1,13 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>lr_mavlink_replay</name><version>0.1.0</version>
+  <description>Causal MAVLink telemetry replay driven by the SVO clock.</description>
+  <maintainer email="maintainers@example.com">Landfill Rover</maintainer>
+  <license>Apache-2.0</license>
+  <buildtool_depend>ament_python</buildtool_depend>
+  <exec_depend>rclpy</exec_depend><exec_depend>ament_index_python</exec_depend><exec_depend>rosgraph_msgs</exec_depend>
+  <exec_depend>diagnostic_msgs</exec_depend><exec_depend>launch_ros</exec_depend>
+  <exec_depend>lr_zed_stream</exec_depend><exec_depend>lr_future_path</exec_depend>
+  <test_depend>python3-pytest</test_depend>
+  <export><build_type>ament_python</build_type></export>
+</package>

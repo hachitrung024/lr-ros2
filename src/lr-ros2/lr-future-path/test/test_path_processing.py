@@ -4,7 +4,6 @@ import numpy as np
 import pytest
 
 from lr_future_path.path_processing import prepare_path, StablePathProcessor
-from lr_future_path.trajectory import PoseSeries
 
 
 def process(points, *, stamps=None, **kwargs):
@@ -75,20 +74,6 @@ def test_configured_point_limit_is_preserved_by_resampling(limit):
     _, points, _ = process([[0, 0, 0], [10, 0, 0]], max_points=limit)
     assert len(points) == limit
     np.testing.assert_allclose(points[0], [0, 0, 0])
-
-
-def test_cached_anchor_interpolates_across_nearest_sample_switch():
-    """Reanchoring must not jump by one cached pose at the nearest-index midpoint."""
-    series = PoseSeries(
-        np.array([0, 100]), np.array([[0., 0, 0], [1., 0, 0]]),
-        np.tile([0., 0, 0, 1], (2, 1)), 'map',
-    )
-    before, _ = series.interpolated_pose(49, 100)
-    after, _ = series.interpolated_pose(51, 100)
-    assert after[0] - before[0] == pytest.approx(.02)
-    with pytest.raises(ValueError, match='gap'):
-        series.interpolated_pose(50, 10)
-    np.testing.assert_allclose(series.interpolated_pose(100, 10)[0], [1, 0, 0])
 
 
 def moving_view(processor, start, *, correction=0., max_points=256):

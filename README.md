@@ -1,115 +1,32 @@
 # Landfill Rover ROS 2
 
-The distributed deployment supports **host SVO2/live camera → ZED Streaming
-NET → Jetson processing → host RViz**. The host owns the SVO source
-and `/clock`; model and MAVLink data stay on Jetson. SDK 5.4.1 uses sequential
-NET playback; pause/seek is experimental and disabled by default. See the
-[three-terminal NET workflow](docs/distributed-rviz.md#host-source--zed-net--jetson--rviz)
-and [source package](src/lr-ros2/lr-zed-stream/README.md). Direct-file and
-same-host workflows remain available below.
+The runtime has one distributed architecture: **host source → Jetson backend →
+host RViz**. The host opens the SVO2 file or live stereo camera. Jetson receives
+stereo images over ZED Streaming NET and runs depth, localization and LR
+segmentation, terrain and prediction. Display data returns over ROS 2 DDS.
 
-To watch Jetson CPU, GPU, memory, temperature, and power while running ROS,
-start the [local performance dashboard](docs/jetson-dashboard.md).
-To measure ROS process CPU/RAM and existing node diagnostics on Jetson, use the
-[node profiling script](docs/jetson-node-profiling.md).
-
-## Full launch command
-
-This command plays an SVO, selects its matching MAVLink session, publishes the
-future ground-truth path, and starts segmentation, terrain geometry, canonical
-prediction, and RViz:
-
-```bash
-ros2 launch lr_display_rviz2 display_zed_cam.launch.py \
-  camera_model:=zed2i \
-  publish_svo_clock:=true \
-  segmentation_model_path:=/path/to/best.pt \
-  mavlink:=true \
-  future_path:=true \
-  svo_path:=/path/to/recording.svo2
+```mermaid
+flowchart LR
+    S["Host: SVO2 / live stereo"] -->|ZED NET| Z["Jetson: ZED SDK + LR"]
+    T["Host: DB telemetry replay"] -->|MAVLink UDP| M["Jetson: MAVROS + pose/TF"]
+    S -->|/clock in SVO mode| T
+    S -->|/clock| Z
+    M --> Z
+    G["Jetson: DB origin + future ground truth"] --> Z
+    Z -->|DDS| R["Host: RViz"]
 ```
 
-The prediction launch arguments are optional. The command above uses the
-default `prediction_profile:=static`. To run the dynamic model, append:
+SVO replay always obtains pose from received MAVROS GPS/attitude telemetry.
+The Jetson DB process supplies the fixed ENU origin and future reference path;
+it does not publish pose or TF. Live NET uses ZED tracking and perception.
+Only the host SVO source publishes `/clock`. Network addresses and ports are
+passed explicitly on the command line.
 
-```bash
-prediction_profile:=dynamic
-```
-
-Dynamic prediction currently requires `mavlink:=true` because its rover-state
-adapter derives velocity and acceleration from `/lr/mavlink/pose`.
-
-By default, `mavlink_db_path` is empty and the launch recursively searches
-`mavlink_dir` for `session_mavlink.db`. To select a database explicitly, use:
-
-```bash
-mavlink_db_path:=/path/to/session_mavlink.db
-```
-
-When `future_path:=true` and `mavlink:=true`, the future path is read directly
-from the MAVLink database. The SVO VIO pose-cache pass is therefore skipped.
-The default future window is bounded by 15 m of cumulative XY travel and 20 s,
-with 0.2 m spatial sampling. Stationary MAVLink samples (at or below 0.1 m/s)
-and samples above 5 m/s are excluded from the path. Override these with
-`future_path_radius_m`, `future_path_horizon_s`, `future_path_step_m`,
-`future_path_stationary_speed_mps`, and `future_path_max_speed_mps`.
-
-## Split headless pipeline and RViz UI
-
-The processing pipeline and RViz can run as separate ROS 2 processes. For a
-same-host test, open two terminals, source the same workspace in both, and use
-the same domain settings:
-
-```bash
-source /opt/ros/humble/setup.bash
-source install/setup.bash
-export ROS_DOMAIN_ID=42
-export ROS_LOCALHOST_ONLY=0
-```
-
-Start the deploy pipeline in the first terminal. This entry point locks
-`start_rviz` to `false`, so it cannot create a GUI on the Jetson:
-
-```bash
-ros2 launch lr_display_rviz2 headless_zed_cam.launch.py \
-  camera_model:=zed2i \
-  publish_svo_clock:=true \
-  segmentation_model_path:=models/best.pt \
-  mavlink:=true \
-  future_path:=true \
-  svo_path:=/zed/svo/zed_20260710_092420_0001.svo2
-```
-
-Start only the debug UI in the second terminal:
-
-```bash
-ros2 launch lr_display_rviz2 rviz_zed_cam.launch.py \
-  camera_model:=zed2i \
-  use_sim_time:=true \
-  svo_mode:=true \
-  segmentation_enabled:=true
-```
-
-The UI host does not open the SVO or model file. It subscribes to the topics,
-TF and `/clock` from the headless host, and its SVO panel calls the remote ZED
-services. Use `segmentation_enabled:=false` to show the ZED RGB topic in the
-main video dock when segmentation is disabled.
-
-For two physical machines, run the first command on the Jetson and the second
-on the laptop. Both machines need compatible ROS 2 installations, the same
-`ROS_DOMAIN_ID`, `ROS_LOCALHOST_ONLY=0`, and this workspace built so the laptop
-has the custom message types and RViz plugins. DDS multicast and UDP traffic
-must be allowed on the LAN. Containers on either machine must use host
-networking. Verify discovery from the laptop before opening RViz:
-
-```bash
-ros2 node list
-ros2 topic list
-ros2 topic echo /clock --once
-```
-
-See [distributed RViz deployment](docs/distributed-rviz.md) for the full
-same-host and LAN checklist.
+Use the [three-terminal run guide](docs/mavros-replay.md) and
+[deployment/network checklist](docs/distributed-rviz.md). The only LR pipeline
+entry points are `headless_zed_cam.launch.py` on Jetson and
+`rviz_zed_cam.launch.py` on the host. SDK 5.4.1 supports sequential NET playback;
+pause/seek remains outside acceptance. See the [migration report](docs/net-mavros-migration.md).
 
 ## Canonical prediction pipeline
 
@@ -123,15 +40,13 @@ Prediction is built as normal ROS 2 packages under `src/lr-ros2`.
 | `lr_prediction_bridge` | Adapters from LR pipeline messages to canonical messages |
 | `lr_path_prediction` | Diagnostic and RViz presentation of canonical output |
 
-The dynamic display pipeline has seven LR application nodes: `mavlink_pose`,
-`segmentation`, `box_estimator_3d`, `terrain_geometry`,
-`prediction_bridge_node`, `prediction_node`, and
-`canonical_prediction_visualizer`. ZED, its component container, robot state
-publisher, and optional RViz are additional infrastructure.
+The Jetson backend runs `mavlink_ground_truth`, `mavros_pose`, segmentation,
+box estimation, terrain geometry, the prediction bridge, prediction runtime
+and visualization publisher. MAVROS, ZED and its static state publisher run
+on Jetson; RViz and the recording source run on the host.
 
-One `prediction_bridge_node` handles the four conversions below. Geometry is
-sampled directly from the trajectory in that process. The four old adapter
-executables remain available for standalone use and share the same converters.
+One `prediction_bridge_node` converts the four inputs below. Geometry is
+sampled directly from the reference trajectory in that process.
 
 The adapters perform these conversions:
 
@@ -179,35 +94,21 @@ Node.
 
 ## Building
 
+Both `zed-dev` containers use ROS 2 Humble, ZED SDK 5.4.1, host networking,
+`ROS_DOMAIN_ID=42` and `ROS_LOCALHOST_ONLY=0`. Install MAVROS/GeographicLib on
+both machines and pymavlink on the host as described in the run guide.
+Stop active launches before building. On the host:
+
 ```bash
-cd /path/to/ros2_ws
 source /opt/ros/humble/setup.bash
-colcon build --symlink-install \
-  --packages-select \
-  safety_perception_msgs \
-  prediction_core \
-  prediction_ros \
-  lr_prediction_bridge \
-  lr_future_path \
-  lr_segmentation \
-  lr_terrain_geometry \
-  lr_path_prediction \
-  lr_display_rviz2
+colcon build --symlink-install --packages-up-to lr_mavlink_replay lr_display_rviz2
 source install/setup.bash
 ```
 
-Run `source install/setup.bash` again after rebuilding new executables.
-For pause/resume with the default `svo_realtime:=true`, build the existing
-ZED SDK 5.4 realtime-pause patch once:
-
-```bash
-CMAKE_BUILD_PARALLEL_LEVEL=2 bash scripts/build_zed_realtime_pause.sh
-source install/setup.bash
-```
-
-This script restores the wrapper source after building the patched component.
-The stereo RViz preset uses the LR overlay/boxes/markers and SVO control panel;
-it does not require the unused ZED object/body display or Nav2 panel plugins.
+Preview and sync source according to [AGENTS.md](AGENTS.md), then build on
+Jetson with `colcon build --symlink-install --packages-up-to lr_display_rviz2`.
+The SVO stays on the host; segmentation models stay on Jetson. A matching DB
+is needed on the host for telemetry and on Jetson for reference ground truth.
 
 ## Rover configuration
 
@@ -258,7 +159,7 @@ Missing/invalid TF or malformed detections do not become an empty observation.
 Mask/depth synchronization retains at most 30 messages per stream and 1 s of
 source time (`sync_buffer.max_samples`, `sync_buffer.max_age_sec`), pairing the
 nearest available timestamps within `sync_tolerance_sec` (50 ms). Each message
-is consumed at most once. Rewinding SVO or changing the time source clears
+is consumed at most once. Restarting replay at an earlier recording time or changing the time source clears
 buffers, terrain, tracking, bridge and runtime caches. Bridge trajectory IDs
 continue increasing after rewind. Pausing leaves the simulation clock still.
 Reset clears presentation without emitting a synthetic empty objects batch;
@@ -271,37 +172,20 @@ unavailable evidence or an expired trajectory.
 
 ## Validation and replay measurement
 
-Tests are selected per package to avoid same-name pytest modules across packages:
+Use the timestamp/units and camera-TF ownership tools in the run guide:
 
 ```bash
-colcon test --packages-select prediction_core prediction_ros lr_prediction_bridge \
-  lr_segmentation lr_terrain_geometry lr_path_prediction lr_display_rviz2
-colcon test-result --verbose
+ros2 run lr_mavros_bridge verify_tf_owner
+python3 src/lr-ros2/lr-mavlink-replay/tools/verify_telemetry.py \
+  --db mavlink/session_20260710_0924_mavlink/session_mavlink.db --duration 30
+python3 src/lr-ros2/lr-zed-stream/tools/verify_net_replay.py \
+  --duration 30 --require-prediction
 ```
 
-The replay observer records 60 SVO seconds after a 10-second warmup and shuts
-down its own launch process group:
-
-```bash
-python3 scripts/benchmark_prediction.py \
-  --output log/prediction-benchmark \
-  --svo /workspace/svo/zed_20260710_092420_0001.svo2 \
-  --model models/best.pt
-```
-
-To verify the original display command with RViz, including pause/resume and
-rewind through the ZED services:
-
-```bash
-python3 scripts/verify_prediction_replay.py \
-  --svo /workspace/svo/zed_20260710_092420_0001.svo2
-```
-
-Reports include observed topic counts, completed cycles, simulated-time latency,
-per-process CPU/RSS and GPU memory/utilization. The observer subscribes to masks
-and boxes, but not debug images/markers. Callback timing and pairing diagnostics
-are recorded when published by that version. See
-[refactor measurements](docs/prediction-refactor.md) for the measured comparison.
+[Transport acceptance](docs/mavros-replay-validation.md) records measured
+conversion errors, causal pose coverage, network load, loss and restart
+behavior. These checks verify transport and pipeline publication; they do not
+establish localization accuracy or prediction quality.
 
 ## Main outputs
 
@@ -325,45 +209,3 @@ are recorded when published by that version. See
 `/lr/future_path/ground_truth` is a recorded future trajectory for offline
 visualization and evaluation. It is not a planned path and must not be used to
 control the rover.
-
-## Other camera modes
-
-SVO with ZED pose, without MAVLink or future prediction:
-
-```bash
-ros2 launch lr_display_rviz2 display_zed_cam.launch.py \
-  camera_model:=zed2i \
-  svo_path:=/path/to/recording.svo2 \
-  publish_svo_clock:=true \
-  mavlink:=false \
-  future_path:=false \
-  segmentation_model_path:=/path/to/best.pt
-```
-
-Future path from ZED VIO:
-
-```bash
-ros2 launch lr_display_rviz2 display_zed_cam.launch.py \
-  camera_model:=zed2i \
-  svo_path:=/path/to/recording.svo2 \
-  publish_svo_clock:=true \
-  mavlink:=false \
-  future_path:=true \
-  future_path_cache_dir:=/path/to/future_path_cache
-```
-
-Live camera:
-
-```bash
-ros2 launch lr_display_rviz2 display_zed_cam.launch.py \
-  camera_model:=zed2i \
-  svo_path:=live \
-  mavlink:=false \
-  future_path:=false \
-  segmentation_model_path:=/path/to/best.pt
-```
-
-MAVLink and the future ground-truth path are supported only with SVO playback,
-not with a live camera. MAVLink publishes `map -> zed_camera_link` when
-`camera_name:=zed`. If exactly one session matching the SVO timestamp cannot be
-found, the launch stops instead of falling back to ZED localization.

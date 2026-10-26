@@ -1,0 +1,358 @@
+{
+  "date": "2026-10-26",
+  "architecture": "Host ZED NET and decoded MAVLink replay -> Jetson MAVROS + LR -> host RViz",
+  "recording": "zed_20260710_092420_0001.svo2",
+  "start_frame": 4500,
+  "sdk": "5.4.1",
+  "mavros": "2.16.0",
+  "ros": "Humble",
+  "gui_opened_during_this_measurement": false,
+  "installed_lr_display_launches": [
+    "headless_zed_cam.launch.py",
+    "rviz_zed_cam.launch.py"
+  ],
+  "installed_lr_future_path_executables": [
+    "mavlink_ground_truth_node"
+  ],
+  "removed_cli_negative_checks_passed": [
+    "ros2 run lr_future_path mavlink_pose_node",
+    "ros2 run lr_future_path svo_pose_cache_node",
+    "ros2 launch lr_display_rviz2 display_zed_cam.launch.py",
+    "headless_zed_cam.launch.py ... mavlink_backend:=db"
+  ],
+  "automated_validation": {
+    "host": {
+      "build_packages": 14,
+      "tests": 187,
+      "errors": 0,
+      "failures": 0,
+      "skipped": 3
+    },
+    "jetson": {
+      "build_packages": 12,
+      "tests": 167,
+      "errors": 0,
+      "failures": 0,
+      "skipped": 3
+    },
+    "xml_validation": "ROS package schema supplied through a temporary XML catalog on both machines; validation was not disabled.",
+    "prebuild_focused_pytest": {
+      "passed": 68
+    }
+  },
+  "hardware_validation": {
+    "comparison": {
+      "passed": true,
+      "extrinsics": "identity (acceptance run)",
+      "future_sample_violations": 0,
+      "same_received_samples_position_error_m": {
+        "samples": 1629,
+        "median": 0.0,
+        "p95": 0.0,
+        "max": 1.7772239894833365e-15
+      },
+      "same_received_samples_quaternion_error": {
+        "samples": 1629,
+        "median": 5.551115123125783e-17,
+        "p95": 1.2738115944464653e-16,
+        "max": 2.498965354837e-16
+      },
+      "offline_ground_truth_position_error_m": {
+        "samples": 1629,
+        "median": 0.033317697602109994,
+        "p95": 0.19186476598338895,
+        "max": 0.38318745588431924
+      },
+      "offline_ground_truth_orientation_error_deg": {
+        "samples": 1629,
+        "median": 0.18020659796631674,
+        "p95": 2.3587709095950773,
+        "max": 7.985486318501395
+      }
+    },
+    "tf-owner": {
+      "camera_tf_owner_count": 1,
+      "received_frames": 117,
+      "passed": true
+    },
+    "telemetry": {
+      "passed": true,
+      "duration_s": 30.009658058999776,
+      "counts": {
+        "attitude": 148,
+        "imu": 415,
+        "gps": 59
+      },
+      "hz": {
+        "attitude": 4.931745630324348,
+        "imu": 13.828881328274354,
+        "gps": 1.9660337310076792
+      },
+      "timestamp_errors": {},
+      "max_errors": {
+        "quaternion_norm_error": 2.9118562087034457e-16,
+        "acceleration_error_mps2": 4.923540896093782e-07,
+        "gps_degrees": 1.4210854715202004e-14,
+        "gps_altitude_m": 1.1368683772161603e-13
+      },
+      "camera_tf_observed": true,
+      "tf_publishers": [
+        "zed_state_publisher",
+        "zed_node",
+        "mavros_pose",
+        "mavros"
+      ],
+      "pose_clock_matches": 414,
+      "clock_frames": 450,
+      "pose_frames": 415,
+      "diagnostics": [
+        {
+          "status": "valid",
+          "frames": "475",
+          "valid_frames": "426",
+          "epoch_us": "1783700660000000"
+        },
+        {
+          "status": "valid",
+          "frames": "490",
+          "valid_frames": "441",
+          "epoch_us": "1783700660000000"
+        },
+        {
+          "status": "valid",
+          "frames": "505",
+          "valid_frames": "456",
+          "epoch_us": "1783700660000000"
+        },
+        {
+          "status": "valid",
+          "frames": "520",
+          "valid_frames": "471",
+          "epoch_us": "1783700660000000"
+        },
+        {
+          "status": "valid",
+          "frames": "535",
+          "valid_frames": "486",
+          "epoch_us": "1783700660000000"
+        },
+        {
+          "status": "valid",
+          "frames": "550",
+          "valid_frames": "501",
+          "epoch_us": "1783700660000000"
+        },
+        {
+          "status": "valid",
+          "frames": "565",
+          "valid_frames": "515",
+          "epoch_us": "1783700660000000"
+        },
+        {
+          "status": "valid",
+          "frames": "580",
+          "valid_frames": "528",
+          "epoch_us": "1783700660000000"
+        },
+        {
+          "status": "valid",
+          "frames": "595",
+          "valid_frames": "542",
+          "epoch_us": "1783700660000000"
+        },
+        {
+          "status": "valid",
+          "frames": "610",
+          "valid_frames": "556",
+          "epoch_us": "1783700660000000"
+        },
+        {
+          "status": "valid",
+          "frames": "625",
+          "valid_frames": "569",
+          "epoch_us": "1783700660000000"
+        },
+        {
+          "status": "valid",
+          "frames": "640",
+          "valid_frames": "582",
+          "epoch_us": "1783700660000000"
+        },
+        {
+          "status": "valid",
+          "frames": "655",
+          "valid_frames": "596",
+          "epoch_us": "1783700660000000"
+        },
+        {
+          "status": "valid",
+          "frames": "670",
+          "valid_frames": "609",
+          "epoch_us": "1783700660000000"
+        },
+        {
+          "status": "valid",
+          "frames": "685",
+          "valid_frames": "623",
+          "epoch_us": "1783700660000000"
+        },
+        {
+          "status": "valid",
+          "frames": "700",
+          "valid_frames": "637",
+          "epoch_us": "1783700660000000"
+        },
+        {
+          "status": "valid",
+          "frames": "715",
+          "valid_frames": "651",
+          "epoch_us": "1783700660000000"
+        },
+        {
+          "status": "valid",
+          "frames": "730",
+          "valid_frames": "664",
+          "epoch_us": "1783700660000000"
+        },
+        {
+          "status": "valid",
+          "frames": "745",
+          "valid_frames": "678",
+          "epoch_us": "1783700660000000"
+        },
+        {
+          "status": "valid",
+          "frames": "760",
+          "valid_frames": "691",
+          "epoch_us": "1783700660000000"
+        },
+        {
+          "status": "valid",
+          "frames": "775",
+          "valid_frames": "704",
+          "epoch_us": "1783700660000000"
+        },
+        {
+          "status": "valid",
+          "frames": "790",
+          "valid_frames": "718",
+          "epoch_us": "1783700660000000"
+        },
+        {
+          "status": "valid",
+          "frames": "805",
+          "valid_frames": "731",
+          "epoch_us": "1783700660000000"
+        },
+        {
+          "status": "valid",
+          "frames": "820",
+          "valid_frames": "746",
+          "epoch_us": "1783700660000000"
+        },
+        {
+          "status": "valid",
+          "frames": "835",
+          "valid_frames": "759",
+          "epoch_us": "1783700660000000"
+        },
+        {
+          "status": "valid",
+          "frames": "850",
+          "valid_frames": "772",
+          "epoch_us": "1783700660000000"
+        },
+        {
+          "status": "valid",
+          "frames": "865",
+          "valid_frames": "785",
+          "epoch_us": "1783700660000000"
+        },
+        {
+          "status": "valid",
+          "frames": "880",
+          "valid_frames": "799",
+          "epoch_us": "1783700660000000"
+        },
+        {
+          "status": "valid",
+          "frames": "895",
+          "valid_frames": "812",
+          "epoch_us": "1783700660000000"
+        },
+        {
+          "status": "valid",
+          "frames": "910",
+          "valid_frames": "826",
+          "epoch_us": "1783700660000000"
+        }
+      ]
+    },
+    "pipeline": {
+      "interface": "enp4s0",
+      "checks": {
+        "single_clock_publisher": true,
+        "rgb_cloud_shared_stamps": 224
+      },
+      "measurements": {
+        "duration_sec": 30.02474952600005,
+        "received_hz": {
+          "terrain": 4.363067205158865,
+          "future_path": 14.721188585345178,
+          "cloud": 7.793570427535682,
+          "pose": 14.388130020065876,
+          "rgb": 7.893487997119474,
+          "overlay": 1.6319869698685832,
+          "prediction": 0.2997527087513724
+        },
+        "ethernet_mbit_sec": {
+          "rx": 619.8242726349653,
+          "tx": 22.88762287275438
+        },
+        "clock_to_return_ms": {
+          "future_path": {
+            "samples": 442,
+            "median": 51.72455949991672,
+            "p95": 81.00998899999468
+          },
+          "cloud": {
+            "samples": 234,
+            "median": 360.61266399997294,
+            "p95": 385.8918649998486
+          },
+          "pose": {
+            "samples": 432,
+            "median": 111.01902999985214,
+            "p95": 118.31705799977499
+          },
+          "rgb": {
+            "samples": 237,
+            "median": 276.4721710000231,
+            "p95": 306.8141500002639
+          },
+          "overlay": {
+            "samples": 49,
+            "median": 1067.8075810001246,
+            "p95": 1364.8443199999747
+          },
+          "prediction": {
+            "samples": 9,
+            "median": 31.908190000194736,
+            "p95": 59.969901999920694
+          }
+        }
+      },
+      "passed": true
+    }
+  },
+  "retired_paths_preserved_under": ".legacy-archive/20261026-net-mavros",
+  "hardware_test_launches_stopped": true,
+  "limits": [
+    "Physical live camera was not exercised; live NET launch and wall-time/terrain configuration were tested.",
+    "RViz launch and Qt plugin tests passed; this hardware measurement did not open a GUI and cannot be compared directly with prior RViz bandwidth measurements.",
+    "SDK MOTION SENSORS REQUIRED warnings remain in NET mode; initial TF readiness warnings were observed before the adapter had telemetry.",
+    "NET pause/seek is still experimental and outside SDK 5.4.1 sequential replay acceptance.",
+    "Jetson clock skew warnings remain; system time was not changed.",
+    "Transport/publication checks do not establish absolute localization accuracy or prediction quality."
+  ]
+}

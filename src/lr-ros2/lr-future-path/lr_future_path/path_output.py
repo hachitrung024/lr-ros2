@@ -8,7 +8,7 @@ from rclpy.clock import JumpThreshold
 from rclpy.duration import Duration
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 
-from .bag_io import nanoseconds_to_stamp, stamp_to_nanoseconds
+from .time_utils import nanoseconds_to_stamp, stamp_to_nanoseconds
 from .path_processing import StablePathProcessor
 
 

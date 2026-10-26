@@ -1,0 +1,5 @@
+<library path="lr_replay_time">
+  <class name="lr_replay_time" type="mavros::plugin::PluginFactoryTemplate&lt;lr_mavros_bridge::ReplayTimePlugin&gt;" base_class_type="mavros::plugin::PluginFactory">
+    <description>Deterministic SYSTEM_TIME mapping for recorded telemetry only.</description>
+  </class>
+</library>

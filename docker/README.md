@@ -144,6 +144,9 @@ colcon build --symlink-install \
   prediction_ros \
   lr_prediction_bridge \
   lr_future_path \
+  lr_zed_stream \
+  lr_mavlink_replay \
+  lr_mavros_bridge \
   lr_segmentation \
   lr_terrain_geometry \
   lr_path_prediction \
@@ -157,52 +160,18 @@ Because `build/`, `install/`, and `log/` are created in the mounted repository,
 the results persist on the host and can be rebuilt without rebuilding the
 Docker image.
 
-## Start the pipeline
+## Start the distributed pipeline
 
-After building and sourcing the mounted workspace:
+Use the [three-terminal guide](../docs/mavros-replay.md): host source with
+explicit ZED/MAVLink endpoints, Jetson NET/MAVROS backend, and host RViz.
+The host opens the SVO/live camera; Jetson opens only a ZED NET receiver.
+Both containers use `--network host`, `ROS_DOMAIN_ID=42` and
+`ROS_LOCALHOST_ONLY=0`. Jetson does not need `DISPLAY` or an X11 mount; only
+the host UI container does. Network addresses and ports are required CLI inputs.
 
-```bash
-ros2 launch lr_display_rviz2 display_zed_cam.launch.py \
-  camera_model:=zed2i \
-  publish_svo_clock:=true \
-  segmentation_model_path:=/workspace/lr-ros2/models/best.pt \
-  mavlink:=true \
-  mavlink_db_path:=/data/mavlink/session_mavlink.db \
-  future_path:=true \
-  svo_path:=/data/svo/recording.svo2
-```
-
-For a headless Jetson deployment, the container does not need `DISPLAY` or the
-X11 socket mount. Keep `--network host`, set the same ROS domain on the Jetson
-and laptop, and start the backend with:
-
-```bash
-export ROS_DOMAIN_ID=42
-export ROS_LOCALHOST_ONLY=0
-
-ros2 launch lr_display_rviz2 headless_zed_cam.launch.py \
-  camera_model:=zed2i \
-  publish_svo_clock:=true \
-  segmentation_model_path:=/workspace/lr-ros2/models/best.pt \
-  mavlink:=true \
-  mavlink_dir:=/data/mavlink \
-  future_path:=true \
-  svo_path:=/data/svo/recording.svo2
-```
-
-In the desktop container on the laptop, keep the display/X11 options and run
-only the UI with the same two environment variables:
-
-```bash
-ros2 launch lr_display_rviz2 rviz_zed_cam.launch.py \
-  camera_model:=zed2i \
-  use_sim_time:=true \
-  svo_mode:=true \
-  segmentation_enabled:=true
-```
-
-The full host-network discovery checklist is in
-[`docs/distributed-rviz.md`](../docs/distributed-rviz.md).
+SVO pose always comes from received telemetry through MAVROS. The matching
+Jetson DB supplies reference origin/path only. Live NET uses ZED tracking.
+Only the host SVO source publishes `/clock`.
 
 After leaving the container, revoke the temporary X11 permission:
 
@@ -214,7 +183,8 @@ xhost -si:localuser:root
 
 - ROS 2 and the ZED wrapper inherited from the base image
 - Grid Map messages and RViz plugin
-- Vision messages, RViz, robot state publisher, rosbag Python support
+- Vision messages, RViz and robot state publisher
+- MAVROS, GeographicLib egm96-5 and host pymavlink replay dependencies
 - ROS build, lint, and test dependencies used by the LR packages
 - NumPy, OpenCV, Shapely, PyTorch, and Ultralytics
 - `rosdep`, `colcon`, CMake, Qt development files, and compiler tools

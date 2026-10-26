@@ -1,5 +1,13 @@
 # Terrain latency tuning on Jetson
 
+The results below are historical measurements from the former local-SVO
+pipeline. Current runtime uses host NET + MAVROS only; they must not be treated
+as a performance acceptance of that architecture. The tool's live measurement
+now receives NET and leaves prediction disabled while instrumenting terrain.
+Start the host source separately, then supply `--stream-address`, `--stream-port`
+and `--mavros-fcu-url` (plus `--mavlink-db-path` if needed). It never opens an
+SVO on Jetson. Captured-frame kernel replay remains available.
+
 The selected profile reduces terrain callback p95 from 697 ms to 236 ms and
 terrain CPU consumption from 238% to 71% in the measured headless SVO interval.
 The largest improvement comes from limiting OpenBLAS to one thread in the
@@ -120,20 +128,23 @@ left running for host RViz inspection.
 ## Reproducing the benchmark
 
 Use `src/lr-ros2/lr-terrain-geometry/tools/benchmark_latency.py` after sourcing
-the workspace on Jetson. Stop the existing backend first: the script owns a
-complete headless launch and shuts that launch down when it finishes.
+the workspace on Jetson. Start the host SVO/telemetry source first. Stop the
+existing Jetson backend: the script owns a NET backend plus an instrumented
+terrain node and shuts them down when it finishes. Prediction is disabled.
 
 ```bash
 export ROS_DOMAIN_ID=42 ROS_LOCALHOST_ONLY=0
 python3 src/lr-ros2/lr-terrain-geometry/tools/benchmark_latency.py \
   --config src/lr-ros2/lr-terrain-geometry/config/terrain_geometry.yaml \
+  --stream-address 10.42.0.1 --stream-port 30000 \
+  --mavros-fcu-url 'udp://0.0.0.0:14540@10.42.0.1:14550' \
   --output /tmp/terrain-live --capture /tmp/terrain-inputs.pkl --blas-threads 1
 python3 src/lr-ros2/lr-terrain-geometry/tools/benchmark_latency.py \
   --config src/lr-ros2/lr-terrain-geometry/config/terrain_geometry.yaml \
   --output /tmp/terrain-replay --replay /tmp/terrain-inputs.pkl --blas-threads 1
 ```
 
-The model/SVO paths default to the files used above. Optional `--warmup`,
+The model path defaults to the file used above; network endpoints have no defaults. Optional `--warmup`,
 `--duration` and `--timeout` control the observation interval. `psutil`, NumPy
 and PyYAML are required. Only load pickle captures from trusted local runs.
 

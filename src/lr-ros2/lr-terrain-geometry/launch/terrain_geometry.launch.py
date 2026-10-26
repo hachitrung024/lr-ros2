@@ -23,6 +23,9 @@ def launch_setup(context, *args, **kwargs):
     trajectory_topic = LaunchConfiguration("trajectory_topic").perform(context)
     if trajectory_topic:
         overrides["input.trajectory_topic"] = trajectory_topic
+    corridor_enabled = LaunchConfiguration("corridor_enabled", default="auto").perform(context)
+    if corridor_enabled != "auto":
+        overrides["corridor.enabled"] = corridor_enabled == "true"
     return [
         Node(
             package="lr_terrain_geometry",
@@ -55,6 +58,8 @@ def generate_launch_description():
             DeclareLaunchArgument("camera_name", default_value="zed"),
             DeclareLaunchArgument("point_cloud_topic", default_value=""),
             DeclareLaunchArgument("trajectory_topic", default_value=""),
+            DeclareLaunchArgument("corridor_enabled", default_value="auto",
+                                  choices=["auto", "true", "false"]),
             DeclareLaunchArgument("map_frame", default_value="map"),
             DeclareLaunchArgument("use_sim_time", default_value="false"),
             DeclareLaunchArgument(

@@ -92,7 +92,7 @@ def launch_setup(context, *args, **kwargs):
                     'use_sim_time': LaunchConfiguration('use_sim_time'),
                     'svo_mode': LaunchConfiguration('svo_mode'),
                     'svo_control_namespace': LaunchConfiguration(
-                        'svo_control_namespace', default=''
+                        'svo_control_namespace', default='/zed_source/zed_node'
                     ),
                 }
             ],
@@ -129,8 +129,8 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument(
                 'svo_control_namespace',
-                default_value='',
-                description='SVO source node, e.g. /zed_source/zed_node. Empty uses this camera.',
+                default_value='/zed_source/zed_node',
+                description='Host SVO source node used by the playback panel.',
             ),
             DeclareLaunchArgument(
                 'segmentation_enabled',
