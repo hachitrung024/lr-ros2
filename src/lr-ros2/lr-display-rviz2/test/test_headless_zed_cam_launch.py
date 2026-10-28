@@ -109,7 +109,35 @@ def test_live_uses_net_tracking_and_wall_time_without_recording_nodes():
     assert dict(includes(actions)[1].launch_arguments)['corridor_enabled'] == 'false'
 
 
+def test_udp_clock_is_a_required_wall_time_process_only_for_standalone_replay():
+    ctx = context(replay_clock_source='udp', clock_udp_bind_address='192.0.2.20',
+                  clock_udp_bind_port='33100')
+    actions = module().launch_setup(ctx)
+    assert executables(actions) == [
+        'replay_clock_bridge', 'mavlink_ground_truth_node', 'mavros_pose',
+    ]
+    bridge = next(a for a in actions if isinstance(a, Node))
+    params = evaluate_parameters(ctx, bridge._Node__parameters)[0]
+    assert params == {'use_sim_time': False, 'bind_address': '192.0.2.20', 'bind_port': 33100}
+    handlers = [a for a in actions if a.__class__.__name__ == 'RegisterEventHandler']
+    assert len(handlers) == 3
+
+
+def test_invalid_clock_source_is_rejected_by_argument_declaration():
+    """Unknown transport choices fail before any process is constructed."""
+    with pytest.raises(RuntimeError, match='replay_clock_source'):
+        context(replay_clock_source='other')
+
+
 @pytest.mark.parametrize('overrides, error', [
+    ({'replay_clock_source': 'udp'}, 'clock_udp_bind'),
+    ({'replay_clock_source': 'udp', 'clock_udp_bind_address': '192.0.2.20',
+      'clock_udp_bind_port': '65536'}, 'clock_udp_bind'),
+    ({'replay_clock_source': 'udp', 'clock_udp_bind_address': '192.0.2.20',
+      'clock_udp_bind_port': 'abc'}, 'clock_udp_bind'),
+    ({'clock_udp_bind_port': '33100'}, 'replay_clock_source'),
+    ({'stream_svo_mode': 'false', 'mavros_fcu_url': '',
+      'replay_clock_source': 'udp'}, 'stream_svo_mode'),
     ({'stream_address': ''}, 'stream_address'),
     ({'stream_port': '32001'}, 'stream_port'),
     ({'stream_port': '65536'}, 'stream_port'),

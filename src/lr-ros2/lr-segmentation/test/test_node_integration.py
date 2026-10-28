@@ -1,3 +1,4 @@
+import json
 import time
 from types import SimpleNamespace
 
@@ -10,7 +11,7 @@ from rclpy.executors import SingleThreadedExecutor
 from rclpy.parameter import Parameter
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import Image
-from std_msgs.msg import Header
+from std_msgs.msg import Header, String
 
 from lr_segmentation.model import SegmentationPrediction
 from lr_segmentation.node import SegmentationNode
@@ -48,6 +49,54 @@ class FakeSegmentationModel:
         labels = np.zeros(image_bgr.shape[:2], dtype=np.uint16)
         labels[1:7, 2:8] = 4
         return SegmentationPrediction(overlay, labels)
+
+
+def test_live_resume_rejoins_images_without_reloading_model_and_fences_work(ros_context):
+    model = FakeSegmentationModel()
+    loaded = []
+
+    def factory(**_kwargs):
+        loaded.append(1)
+        return model
+
+    node = SegmentationNode(
+        parameter_overrides=[Parameter('model.path', value='unused.pt'),
+                             Parameter('source_guard_enabled', value=True)],
+        model_factory=factory,
+    )
+    try:
+        guard = node._source_guard
+
+        def state(generation, ready):
+            guard.on_state(String(data=json.dumps({
+                'generation': generation, 'ready': ready, 'start_ns': 1})))
+
+        previous = node._image_subscription
+        state(1, True)
+        assert node._image_subscription is not previous
+        assert node._model is model and len(loaded) == 1
+        previous = node._image_subscription
+        state(1, True)
+        assert node._image_subscription is previous
+        state(2, False)
+        state(2, True)
+        assert node._image_subscription is not previous
+        assert node._model is model and len(loaded) == 1
+        masks = []
+        node._mask_publisher = SimpleNamespace(publish=masks.append)
+        original = model.predict
+
+        def predict(image, **kwargs):
+            state(3, False)
+            return original(image, **kwargs)
+
+        model.predict = predict
+        image = make_color_image()
+        image.header.stamp = node.get_clock().now().to_msg()
+        node._on_image(image)
+        assert not masks
+    finally:
+        node.destroy_node()
 
 
 @pytest.fixture

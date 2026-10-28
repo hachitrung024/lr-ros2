@@ -5,6 +5,7 @@ import ctypes
 import json
 from pathlib import Path
 import time
+from types import SimpleNamespace
 
 from ament_index_python.packages import get_package_prefix
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
@@ -18,7 +19,7 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, DurabilityPolicy, qos_profile_sensor_data
 from rosgraph_msgs.msg import Clock
 from sensor_msgs.msg import NavSatFix, Imu
-from std_msgs.msg import UInt64
+from std_msgs.msg import Header, String, UInt64
 from tf2_ros import TransformBroadcaster
 
 from lr_future_path.mavlink import apply_body_to_camera, geodetic_to_enu
@@ -36,6 +37,12 @@ class MavrosPose(Node):
         def param(name, value):
             return self.declare_parameter(name, value).value
 
+        self.live = param('time_mode', 'replay') == 'live'
+        self.live_ready = False
+        self.generation = None
+        self.runtime_id = ''
+        self.retired_runtimes = set()
+        self.start_ns = 0
         self.map_frame = param("map_frame", "map")
         self.child_frame = param("child_frame", "zed_camera_link")
         self.body_to_camera = np.asarray(param("body_to_camera", [0.0] * 6))
@@ -68,22 +75,28 @@ class MavrosPose(Node):
         self.status = "waiting_clock"
         self.total = self.valid = 0
         audit_path = param("audit_file", "")
-        self.audit = open(audit_path, "w") if audit_path else None
+        self.audit = open(audit_path, "a" if self.live else "w") if audit_path else None
         self.pose_pub = self.create_publisher(
             PoseStamped, param("pose_topic", "/lr/mavlink/pose"), 10
         )
         self.tf = TransformBroadcaster(self)
         self.diag = self.create_publisher(DiagnosticArray, "/diagnostics", 10)
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
-        self.create_subscription(GeoPointStamped, "/lr/mavlink/origin", self.on_origin, latched)
-        self.create_subscription(UInt64, "/mavros/replay_time/epoch_us", self.on_epoch, latched)
+        if self.live:
+            self.origin_pub = self.create_publisher(GeoPointStamped, '/lr/mavlink/origin', latched)
+            self.create_subscription(String, '/lr/source/generation', self.on_generation, latched)
+            self.create_subscription(Header, '/lr/net/frame_stamp', self.on_frame, 100)
+        else:
+            self.create_subscription(GeoPointStamped, "/lr/mavlink/origin", self.on_origin, latched)
+            self.create_subscription(UInt64, "/mavros/replay_time/epoch_us", self.on_epoch, latched)
         self.create_subscription(
             NavSatFix, "/mavros/global_position/raw/fix", self.on_gps, qos_profile_sensor_data
         )
         self.create_subscription(
             Imu, "/mavros/imu/data", self.on_attitude, qos_profile_sensor_data
         )
-        self.create_subscription(Clock, "/clock", self.on_clock, 100)
+        if not self.live:
+            self.create_subscription(Clock, "/clock", self.on_clock, 100)
         self.create_timer(0.01, self.process, clock=RosClock(clock_type=ClockType.STEADY_TIME))
         self.create_timer(1.0, self.diagnostics, clock=RosClock(clock_type=ClockType.STEADY_TIME))
 
@@ -91,6 +104,40 @@ class MavrosPose(Node):
         self.pending.clear()
         self.estimator.reset()
         self.status = "waiting_samples"
+
+    def on_generation(self, message):
+        try:
+            state = json.loads(message.data)
+            generation = (state.get('runtime_id', ''), state['generation'])
+            ready = state['ready']
+            runtime = generation[0]
+            if runtime in self.retired_runtimes:
+                return
+            if runtime == self.runtime_id and self.generation and generation < self.generation:
+                return
+            if runtime != self.runtime_id:
+                if self.runtime_id:
+                    self.retired_runtimes.add(self.runtime_id)
+                self.runtime_id = runtime
+            if generation != self.generation or (self.live_ready and not ready):
+                self.reset()
+                self.clock_ns = 0
+            self.generation, self.live_ready = generation, ready
+            self.start_ns = int(state['start_ns'])
+            if self.origin is None and state.get('origin') is not None:
+                origin = GeoPointStamped()
+                origin.header.frame_id = self.map_frame
+                origin.header.stamp = self.get_clock().now().to_msg()
+                origin.position.latitude, origin.position.longitude, origin.position.altitude = (
+                    state['origin'])
+                self.on_origin(origin)
+                self.origin_pub.publish(origin)
+        except (KeyError, ValueError, TypeError):
+            return
+
+    def on_frame(self, message):
+        if self.accepted_stamp(stamp_ns(message.stamp)):
+            self.on_clock(SimpleNamespace(clock=message.stamp))
 
     def on_origin(self, message):
         origin = np.array(
@@ -109,6 +156,10 @@ class MavrosPose(Node):
 
     def accepted_stamp(self, stamp):
         # Reject old-run packets after rewind; tolerate ordinary UDP/DDS arrival ordering.
+        if self.live:
+            now = self.get_clock().now().nanoseconds
+            return self.live_ready and self.start_ns <= stamp <= now + 500_000_000 and (
+                now - stamp <= 2_000_000_000)
         return (
             self.epoch_us > 0
             and self.clock_ns > 0
@@ -117,7 +168,7 @@ class MavrosPose(Node):
 
     def on_gps(self, message):
         stamp = stamp_ns(message.header.stamp)
-        if self.origin is None or not self.accepted_stamp(stamp):
+        if (not self.live and self.origin is None) or not self.accepted_stamp(stamp):
             return
         valid = message.status.status >= 0 and all(
             np.isfinite(v) for v in (message.latitude, message.longitude, message.altitude)
@@ -126,6 +177,14 @@ class MavrosPose(Node):
         if valid:
             # MAVROS publishes ellipsoid height; legacy ground truth uses the DB's AMSL height.
             msl = message.altitude - self.geoid_height(message.latitude, message.longitude)
+            if self.live and self.origin is None:
+                self.origin = np.array([message.latitude, message.longitude, msl])
+                origin = GeoPointStamped()
+                origin.header.frame_id = self.map_frame
+                origin.header.stamp = message.header.stamp
+                origin.position.latitude, origin.position.longitude, origin.position.altitude = (
+                    self.origin.tolist())
+                self.origin_pub.publish(origin)
             position = geodetic_to_enu(
                 np.array([[message.latitude, message.longitude, msl]]), self.origin
             )[0]
@@ -157,7 +216,8 @@ class MavrosPose(Node):
         while self.pending and self.pending[0][1] <= now:
             stamp, _ = self.pending.popleft()
             self.total += 1
-            if not self.epoch_us or self.origin is None:
+            if (not self.live and not self.epoch_us) or self.origin is None or (
+                    self.live and not self.accepted_stamp(stamp)):
                 self.status = "waiting_epoch_or_origin"
                 continue
             sample, self.status, evidence = self.estimator.estimate(stamp)
@@ -199,7 +259,7 @@ class MavrosPose(Node):
 
     def diagnostics(self):
         if time.monotonic() - self.last_clock_wall > 2.0:
-            self.status = "clock_stopped"
+            self.status = "frames_stopped" if self.live else "clock_stopped"
         message = DiagnosticArray()
         message.header.stamp = self.get_clock().now().to_msg()
         status = DiagnosticStatus(

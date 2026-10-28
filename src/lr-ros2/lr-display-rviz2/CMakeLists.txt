@@ -78,6 +78,7 @@ if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   find_package(ament_cmake_pytest REQUIRED)
   find_package(ament_cmake_gtest REQUIRED)
+  ament_add_pytest_test(test_headless_live_launch test/test_headless_live_launch.py)
   set(ament_cmake_clang_format_CONFIG_FILE "${CMAKE_CURRENT_SOURCE_DIR}/.clang-format")
   ament_lint_auto_find_test_dependencies()
   ament_add_pytest_test(test_headless_zed_cam_launch
@@ -101,6 +102,7 @@ add_custom_target(all_${PROJECT_NAME}_files SOURCES ${all_files})
 
 # Install LAUNCH files
 install(FILES
+  launch/headless_live.launch.py
   launch/headless_zed_cam.launch.py
   launch/rviz_zed_cam.launch.py
   DESTINATION share/${PROJECT_NAME}/launch

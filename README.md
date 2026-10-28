@@ -1,30 +1,40 @@
 # Landfill Rover ROS 2
 
-The runtime has one distributed architecture: **host source → Jetson backend →
-host RViz**. The host opens the SVO2 file or live stereo camera. Jetson receives
-stereo images over ZED Streaming NET and runs depth, localization and LR
-segmentation, terrain and prediction. Display data returns over ROS 2 DDS.
+The distributed architecture is **host source → Jetson backend → host RViz**.
+The [always-on live backend](docs/always-on-live.md) receives ZED NET and MAVLink,
+uses wall time, and runs pose/TF, terrain and segmentation without a Jetson DB
+or `/clock`. The host simulator runs Python independently of ROS. Prediction
+is disabled in this mode; the two recorded-time replay paths remain available.
 
 ```mermaid
 flowchart LR
     S["Host: SVO2 / live stereo"] -->|ZED NET| Z["Jetson: ZED SDK + LR"]
-    T["Host: DB telemetry replay"] -->|MAVLink UDP| M["Jetson: MAVROS + pose/TF"]
-    S -->|/clock in SVO mode| T
-    S -->|/clock| Z
+    T["FCU / host DB replay"] -->|MAVLink UDP + time calibration| M["Jetson: MAVROS + pose/TF"]
     M --> Z
-    G["Jetson: DB origin + future ground truth"] --> Z
     Z -->|DDS| R["Host: RViz"]
 ```
 
-SVO replay always obtains pose from received MAVROS GPS/attitude telemetry.
+The new `headless_live.launch.py` obtains pose from received MAVROS GPS/attitude,
+sets a fixed origin from the first valid GPS fix and survives host restarts.
+Camera/FCU hardware and the SVO simulator use that same backend command.
+See [live acceptance results](docs/always-on-live-validation.md).
+
+The recorded-time replay baseline obtains pose from received MAVROS GPS/attitude.
 The Jetson DB process supplies the fixed ENU origin and future reference path;
-it does not publish pose or TF. Live NET uses ZED tracking and perception.
-Only the host SVO source publishes `/clock`. Network addresses and ports are
-passed explicitly on the command line.
+it does not publish pose or TF. The original `stream_svo_mode:=false` launch
+retains its ZED tracking behavior.
+With the existing ROS source, only the host SVO source publishes `/clock`.
+An optional [standalone Python source](tools/host_replay/README.md) sends NET,
+MAVLink and UDP clock without ROS; `/replay_clock_bridge` on Jetson is then
+the sole ROS clock publisher. Network addresses and ports are passed explicitly
+on the command line. The original ROS source remains available for comparison.
+See [standalone validation](docs/standalone-replay-validation.md) for the real
+NET/MAVLink and source-restart checks.
 
 Use the [three-terminal run guide](docs/mavros-replay.md) and
 [deployment/network checklist](docs/distributed-rviz.md). The only LR pipeline
-entry points are `headless_zed_cam.launch.py` on Jetson and
+entry points are `headless_live.launch.py` (wall time) or
+`headless_zed_cam.launch.py` (baseline replay) on Jetson and
 `rviz_zed_cam.launch.py` on the host. SDK 5.4.1 supports sequential NET playback;
 pause/seek remains outside acceptance. See the [migration report](docs/net-mavros-migration.md).
 
@@ -40,7 +50,7 @@ Prediction is built as normal ROS 2 packages under `src/lr-ros2`.
 | `lr_prediction_bridge` | Adapters from LR pipeline messages to canonical messages |
 | `lr_path_prediction` | Diagnostic and RViz presentation of canonical output |
 
-The Jetson backend runs `mavlink_ground_truth`, `mavros_pose`, segmentation,
+The recorded-time replay backend runs `mavlink_ground_truth`, `mavros_pose`, segmentation,
 box estimation, terrain geometry, the prediction bridge, prediction runtime
 and visualization publisher. MAVROS, ZED and its static state publisher run
 on Jetson; RViz and the recording source run on the host.
@@ -108,7 +118,8 @@ source install/setup.bash
 Preview and sync source according to [AGENTS.md](AGENTS.md), then build on
 Jetson with `colcon build --symlink-install --packages-up-to lr_display_rviz2`.
 The SVO stays on the host; segmentation models stay on Jetson. A matching DB
-is needed on the host for telemetry and on Jetson for reference ground truth.
+is needed on the host for telemetry. Only the recorded-time replay backend
+also needs the DB on Jetson for reference ground truth.
 
 ## Rover configuration
 

@@ -221,6 +221,11 @@ class TerrainGeometryNode(Node):
             ),
             post_callback=self._on_time_jump,
         )
+        self._source_guard = None
+        self._source_token = None
+        if self.declare_parameter('source_guard_enabled', False).value:
+            from lr_mavros_bridge.source_guard import SourceGuard
+            self._source_guard = SourceGuard(self, self._on_time_jump, self._on_source_resume)
 
         self.get_logger().info(
             f"Terrain geometry listening on {self._point_cloud_topic}; "
@@ -311,6 +316,10 @@ class TerrainGeometryNode(Node):
         return corridor
 
     def _on_point_cloud(self, message: PointCloud2) -> None:
+        guard = getattr(self, '_source_guard', None)
+        token = guard.token() if guard else None
+        if guard and not guard.valid(message.header.stamp, token):
+            return
         callback_started = time.monotonic()
         self._last_receive_monotonic = callback_started
         self._input_count += 1
@@ -324,6 +333,7 @@ class TerrainGeometryNode(Node):
             return
 
         with self._state_lock:
+            self._source_token = token
             self._process_point_cloud(
                 message,
                 timestamp,
@@ -345,6 +355,13 @@ class TerrainGeometryNode(Node):
                 self._last_rover_position,
             )
         self.get_logger().info("ROS time changed; cleared terrain TF cache and estimator state.")
+
+    def _on_source_resume(self):
+        with self._state_lock:
+            self.destroy_subscription(self._cloud_subscription)
+            self._cloud_subscription = self.create_subscription(
+                PointCloud2, self._point_cloud_topic, self._on_point_cloud,
+                QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT))
 
     def _process_point_cloud(
         self,
@@ -433,6 +450,9 @@ class TerrainGeometryNode(Node):
             )
 
     def _publish_snapshot(self, result, stamp, rover_position) -> None:
+        guard = getattr(self, '_source_guard', None)
+        if guard and result.cell_count and not guard.valid(stamp, self._source_token):
+            return
         grid_map = terrain_result_to_grid_map(
             result,
             rover_position,

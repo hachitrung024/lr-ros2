@@ -90,6 +90,22 @@ def launch_setup(context, *args, **kwargs):
     except ValueError:
         return _stop_launch('stream_port must be even and in [2, 65534].')
     svo = _value(context, 'stream_svo_mode') == 'true'
+    clock_source = _value(context, 'replay_clock_source')
+    clock_address = _value(context, 'clock_udp_bind_address')
+    clock_port = _value(context, 'clock_udp_bind_port')
+    if clock_source not in ('ros', 'udp'):
+        return _stop_launch('replay_clock_source must be ros or udp.')
+    if clock_source == 'udp':
+        if not svo:
+            return _stop_launch('UDP replay clock requires stream_svo_mode:=true.')
+        try:
+            if not clock_address or not 1 <= int(clock_port) <= 65535:
+                raise ValueError
+        except ValueError:
+            return _stop_launch('UDP clock requires clock_udp_bind_address and '
+                                'clock_udp_bind_port in [1, 65535].')
+    elif clock_address or clock_port:
+        return _stop_launch('Clock UDP endpoints require replay_clock_source:=udp.')
     fcu_url = _value(context, 'mavros_fcu_url')
     if svo and not fcu_url:
         return _stop_launch('SVO NET requires an explicit mavros_fcu_url.')
@@ -167,7 +183,16 @@ def launch_setup(context, *args, **kwargs):
                 'audit_file': _value(context, 'mavros_audit_file'),
             }],
         )
-        for node in (reference, adapter):
+        replay_nodes = [reference, adapter]
+        if clock_source == 'udp':
+            replay_nodes.insert(0, Node(
+                package='lr_mavros_bridge', executable='replay_clock_bridge',
+                name='replay_clock_bridge', output='screen', parameters=[{
+                    'use_sim_time': False, 'bind_address': clock_address,
+                    'bind_port': int(clock_port),
+                }],
+            ))
+        for node in replay_nodes:
             nodes.extend([RegisterEventHandler(OnProcessExit(
                 target_action=node, on_exit=_process_exited,
             )), node])
@@ -213,6 +238,13 @@ def generate_launch_description():
         DeclareLaunchArgument('stream_port', description='Host ZED NET sender port (even).'),
         DeclareLaunchArgument('stream_svo_mode', choices=['true', 'false'],
                               description='true: host SVO + MAVROS; false: host live camera.'),
+        DeclareLaunchArgument('replay_clock_source', default_value='ros',
+                              choices=['ros', 'udp'],
+                              description='ros: legacy host /clock; udp: standalone host clock.'),
+        DeclareLaunchArgument('clock_udp_bind_address', default_value='',
+                              description='Required for UDP clock: Jetson bind address.'),
+        DeclareLaunchArgument('clock_udp_bind_port', default_value='',
+                              description='Required for UDP clock: Jetson UDP bind port.'),
         DeclareLaunchArgument('mavros_fcu_url', default_value='',
                               description='Required for SVO: explicit MAVROS transport URL.'),
         DeclareLaunchArgument('mavros_audit_file', default_value=''),

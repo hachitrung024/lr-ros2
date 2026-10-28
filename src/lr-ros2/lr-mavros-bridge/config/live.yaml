@@ -1,0 +1,24 @@
+/**:
+  ros__parameters:
+    use_sim_time: false
+    plugin_allowlist: [command, sys_status, sys_time, global_position, imu, lr_source_time]
+    target_system_id: 1
+    target_component_id: 1
+/**/sys:
+  ros__parameters:
+    heartbeat_rate: 1.0
+    conn_timeout: 3.0
+/**/time:
+  ros__parameters:
+    timesync_mode: MAVLINK
+    timesync_rate: 10.0
+    convergence_window: 30
+    max_rtt_sample: 20
+/**/global_position:
+  ros__parameters:
+    frame_id: map
+    child_frame_id: base_link
+    tf.send: false
+/**/imu:
+  ros__parameters:
+    frame_id: base_link

@@ -2,8 +2,18 @@
 
 - Hai máy dùng ROS 2 Humble, container tên `zed-dev`, repo trong container ở `/zed/lr-ros2`. SSH tới Jetson bằng `ssh jetson`.
 - Host chạy nguồn SVO2/live bằng `lr_zed_stream` và RViz; Jetson nhận ZED Streaming NET và chạy backend headless. Cả hai container dùng mạng host, `ROS_DOMAIN_ID=42`, `ROS_LOCALHOST_ONLY=0`.
+- Có thêm nguồn SVO + MAVLink Python độc lập tại `tools/host_replay/`, không cần ROS/colcon. Giữ nguyên hai package nguồn ROS cũ để đối chiếu. Xem [hướng dẫn nguồn độc lập](tools/host_replay/README.md). Công cụ này chỉ chạy trên máy phát; không cần đồng bộ `tools/` sang Jetson.
 
 ## Dev: đồng bộ source từ host sang Jetson
+
+Đường chạy thường trực mới: xem [docs/always-on-live.md](docs/always-on-live.md).
+Jetson dùng `headless_live.launch.py` với NET endpoint và `mavros_fcu_url` rõ ràng;
+host dùng `tools/host_replay/replay.py --time-mode live`. Không dùng DB trên
+Jetson, không `/clock`, không prediction; gốc ENU lấy GPS đầu tiên. RViz dùng
+`use_sim_time:=false svo_mode:=false prediction_enabled:=false`. Host chrony và
+Jetson systemd-timesyncd đã được cấu hình đồng bộ NTP qua host; kiểm tra trước
+khi chạy live. Các lệnh replay bên dưới vẫn là baseline, không chạy đồng thời
+với nguồn live trên cùng endpoint.
 
 Chạy tại gốc repo **trên host** sau khi sửa code. Git liệt kê file đã theo dõi và file mới không bị `.gitignore` loại trừ, chỉ trong `src/lr-ros2`. Xem trước rồi mới đồng bộ; không gửi cache/build, SVO, model và không xóa file trên Jetson.
 
@@ -66,15 +76,15 @@ cd /zed/lr-ros2
 source /opt/ros/humble/setup.bash
 source install/setup.bash
 export ROS_DOMAIN_ID=42 ROS_LOCALHOST_ONLY=0
-ros2 topic info /clock --verbose  # chỉ một publisher: /zed_source/zed_node
+ros2 topic info /clock --verbose  # một publisher: nguồn ROS hoặc /replay_clock_bridge
 ros2 launch lr_display_rviz2 rviz_zed_cam.launch.py \
   camera_model:=zed2i use_sim_time:=true svo_mode:=false \
   svo_control_namespace:=/zed_source/zed_node \
   segmentation_enabled:=true
 ```
 
-Backend Jetson chỉ nhận NET; không có tham số mở SVO/camera cục bộ hoặc phát clock. `stream_svo_mode:=true` luôn khởi động MAVROS, adapter pose và node ground truth. Với live camera, backend dùng `stream_svo_mode:=false`, bỏ `mavros_fcu_url` và DB; UI dùng `use_sim_time:=false svo_mode:=false prediction_enabled:=false`.
+Backend Jetson chỉ nhận NET; không có tham số mở SVO/camera cục bộ. `stream_svo_mode:=true` luôn khởi động MAVROS, adapter pose và node ground truth. `replay_clock_source:=ros` mặc định nhận `/clock` từ nguồn ROS host. Với nguồn Python độc lập, thêm `replay_clock_source:=udp clock_udp_bind_address:=0.0.0.0 clock_udp_bind_port:=30010`; truyền cùng cổng đích clock cho script. Chỉ `/replay_clock_bridge` trên Jetson phát `/clock` trong chế độ này; không chạy nguồn ROS cũ đồng thời. Với live camera, backend dùng `stream_svo_mode:=false`, bỏ `mavros_fcu_url` và DB; UI dùng `use_sim_time:=false svo_mode:=false prediction_enabled:=false`.
 
 Nếu không thấy `/clock`, kiểm tra nguồn SVO trên host. Nếu Jetson không thấy dữ liệu, kiểm tra domain, mạng host, DDS UDP/multicast và ZED NET UDP cổng chẵn `30000`. Chỉ chạy `rviz_zed_cam.launch.py` làm UI trên host. NET đưa ảnh vào Jetson; ảnh/point cloud/kết quả RViz chiều ngược lại vẫn đi DDS. Kiến trúc hiện tại được mô tả trong [README.md](README.md) và [docs/distributed-rviz.md](docs/distributed-rviz.md).
 
-IP/port MAVLink phải truyền rõ qua command line ở cả hai đầu, không có giá trị mặc định trong code. Ví dụ trên dùng UDP host `10.42.0.1:14550` → Jetson `10.42.0.242:14540`; trước `@` trong `mavros_fcu_url` là địa chỉ/cổng bind của Jetson, sau `@` là host. Chỉ nguồn ZED phát `/clock`. Node ground truth chỉ giữ DB làm tham chiếu; adapter pose chỉ đọc telemetry đã nhận. Pipeline cũ, DB pose/TF và VIO cache đã bị loại bỏ.
+IP/port MAVLink và UDP clock phải truyền rõ qua command line ở cả hai đầu, không có giá trị mặc định trong code. Ví dụ trên dùng UDP host `10.42.0.1:14550` → Jetson `10.42.0.242:14540`; trước `@` trong `mavros_fcu_url` là địa chỉ/cổng bind của Jetson, sau `@` là host. Mỗi đường chạy chỉ có một publisher `/clock`: nguồn ZED ROS trên host hoặc clock bridge trên Jetson. Node ground truth chỉ giữ DB làm tham chiếu; adapter pose chỉ đọc telemetry đã nhận. Pipeline cũ, DB pose/TF và VIO cache đã bị loại bỏ.

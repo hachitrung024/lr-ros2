@@ -78,6 +78,7 @@ class SegmentationNode(Node):
             self._on_image,
             image_qos,
         )
+        self._image_topic, self._image_qos = str(image_topic), image_qos
         self._processing_ms = 0.0
         self._failure_count = 0
         self._last_success_ns = None
@@ -90,14 +91,28 @@ class SegmentationNode(Node):
             ),
             post_callback=self._on_time_jump,
         )
+        self._source_guard = None
+        self._received_images = self._guard_rejections = 0
+        if self.declare_parameter('source_guard_enabled', False).value:
+            from lr_mavros_bridge.source_guard import SourceGuard
+            self._source_guard = SourceGuard(self, self._on_time_jump, self._on_source_resume)
         self.get_logger().info(f"RGB={image_topic}; overlay=~/overlay; mask=~/instance_mask")
 
     def _on_image(self, message: Image) -> None:
+        self._received_images = getattr(self, '_received_images', 0) + 1
+        guard = getattr(self, '_source_guard', None)
+        token = guard.token() if guard else None
+        if guard and not guard.valid(message.header.stamp, token):
+            self._guard_rejections += 1
+            return
         started = time.monotonic()
         try:
             image_bgr = image_message_to_bgr(message)
             render_overlay = self._overlay_publisher.get_subscription_count() > 0
             prediction = self._model.predict(image_bgr, render_overlay=render_overlay)
+            if guard and not guard.valid(message.header.stamp, token):
+                self._guard_rejections += 1
+                return
             mask = labels_to_image_message(
                 prediction.instance_labels,
                 message.header,
@@ -119,6 +134,12 @@ class SegmentationNode(Node):
     def _on_time_jump(self, _jump):
         self._last_success_ns = None
         self._last_error = "Waiting for an image after ROS time change"
+
+    def _on_source_resume(self):
+        # Rejoin the new writer after a NET container exit. Keep the loaded model.
+        self.destroy_subscription(self._image_subscription)
+        self._image_subscription = self.create_subscription(
+            Image, self._image_topic, self._on_image, self._image_qos)
 
     def _publish_diagnostics(self):
         now = self.get_clock().now()
@@ -143,6 +164,15 @@ class SegmentationNode(Node):
                 ],
             )
         ]
+        if self._source_guard is not None:
+            guard = self._source_guard
+            message.status[0].values.extend([
+                KeyValue(key='received_images', value=str(self._received_images)),
+                KeyValue(key='guard_rejections', value=str(self._guard_rejections)),
+                KeyValue(key='source_ready', value=str(guard.ready)),
+                KeyValue(key='source_generation', value=str(guard.token())),
+                KeyValue(key='source_state_age_s', value=str(time.monotonic() - guard.seen)),
+            ])
         self._diagnostics.publish(message)
 
 
@@ -152,7 +182,16 @@ def main(args=None) -> None:
     node = None
     try:
         node = SegmentationNode()
-        rclpy.spin(node)
+        if node._source_guard is None:
+            rclpy.spin(node)
+        else:
+            from rclpy.executors import MultiThreadedExecutor
+            executor = MultiThreadedExecutor(num_threads=2)
+            executor.add_node(node)
+            try:
+                executor.spin()
+            finally:
+                executor.shutdown()
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
     except RuntimeError:

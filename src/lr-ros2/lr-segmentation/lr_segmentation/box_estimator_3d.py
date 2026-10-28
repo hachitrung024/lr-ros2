@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import math
 import time
+from contextlib import nullcontext
+from threading import RLock
 
 import numpy as np
 import rclpy
@@ -290,6 +292,12 @@ class BoxEstimator3DNode(Node):
             ),
             post_callback=self._on_time_jump,
         )
+        self._source_guard = None
+        self._live_state_lock = RLock()
+        if self.declare_parameter('source_guard_enabled', False).value:
+            from lr_mavros_bridge.source_guard import SourceGuard
+            self._source_guard = SourceGuard(
+                self, self._on_source_reset, self._on_source_resume)
         self.get_logger().info(
             f"mask={self._mask_topic}; depth={self._depth_topic}; "
             f"boxes={self._box_topic}; footprints={self._footprint_topic}; "
@@ -396,10 +404,16 @@ class BoxEstimator3DNode(Node):
         self._up_axis = _unit_vector(self._up_axis, "geometry.up_axis")
 
     def _on_mask(self, message: Image) -> None:
+        guard = getattr(self, '_source_guard', None)
+        if guard and not guard.valid(message.header.stamp, guard.token()):
+            return
         self._pairs.add("mask", message, now_ns=self.get_clock().now().nanoseconds)
         self._try_estimate()
 
     def _on_depth(self, message: Image) -> None:
+        guard = getattr(self, '_source_guard', None)
+        if guard and not guard.valid(message.header.stamp, guard.token()):
+            return
         self._pairs.add("depth", message, now_ns=self.get_clock().now().nanoseconds)
         self._try_estimate()
 
@@ -437,6 +451,26 @@ class BoxEstimator3DNode(Node):
         )
 
     def _try_estimate(self) -> None:
+        with getattr(self, '_live_state_lock', nullcontext()):
+            self._try_estimate_locked()
+
+    def _on_source_reset(self, _event):
+        with self._live_state_lock:
+            self._on_time_jump(None)
+
+    def _on_source_resume(self):
+        with self._live_state_lock:
+            self._camera_info = None
+            self.destroy_subscription(self._depth_subscription)
+            self.destroy_subscription(self._camera_info_subscription)
+            self._depth_subscription = self.create_subscription(
+                Image, str(self._depth_topic), self._on_depth,
+                self._input_image_qos(self._depth_reliability))
+            self._camera_info_subscription = self.create_subscription(
+                CameraInfo, str(self._camera_info_topic), self._on_camera_info,
+                QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT))
+
+    def _try_estimate_locked(self) -> None:
         if self._camera_info is None:
             return
         while True:
@@ -471,6 +505,10 @@ class BoxEstimator3DNode(Node):
         self.get_logger().warning(self._last_error, throttle_duration_sec=2.0)
 
     def _estimate_pair(self, mask_message, depth_message, *, output_transform=None) -> None:
+        guard = getattr(self, '_source_guard', None)
+        token = guard.token() if guard else None
+        if guard and not guard.valid(depth_message.header.stamp, token):
+            return
         try:
             labels = instance_mask_message_to_labels(mask_message)
             depth_m = depth_message_to_meters(depth_message)
@@ -501,6 +539,8 @@ class BoxEstimator3DNode(Node):
         )
         if measurements and not tracked_boxes:
             self._last_error = "Waiting for object confirmation"
+            return
+        if guard and not guard.valid(header.stamp, token):
             return
         self._box_publisher.publish(_detection_array(header, tracked_boxes))
         self._footprint_publisher.publish(_tracked_object_array(header, tracked_boxes))
@@ -682,7 +722,16 @@ def main(args=None) -> None:
     node = None
     try:
         node = BoxEstimator3DNode()
-        rclpy.spin(node)
+        if node._source_guard is None:
+            rclpy.spin(node)
+        else:
+            from rclpy.executors import MultiThreadedExecutor
+            executor = MultiThreadedExecutor(num_threads=2)
+            executor.add_node(node)
+            try:
+                executor.spin()
+            finally:
+                executor.shutdown()
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
     except RuntimeError:

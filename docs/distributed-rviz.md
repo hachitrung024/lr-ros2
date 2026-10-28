@@ -1,5 +1,10 @@
 # Distributed host source, Jetson backend and host RViz
 
+For the new persistent wall-time backend, use the [always-on live guide](always-on-live.md):
+`headless_live.launch.py` runs without Jetson DB, ground truth, prediction or
+`/clock`; pose owns map TF and the ENU origin comes from GPS. The remaining
+commands in this document describe the preserved baseline paths.
+
 Follow the [three-terminal run guide](mavros-replay.md) for the complete SVO
 and live commands, dependencies and explicit IP/port configuration.
 
@@ -9,6 +14,12 @@ and live commands, dependencies and explicit IP/port configuration.
   `camera_model`, `stream_address`, `stream_port`, `stream_svo_mode`.
 - Host UI: `lr_display_rviz2 rviz_zed_cam.launch.py`. Image/result subscriptions
   remain under `/zed`; SVO control targets `/zed_source/zed_node`.
+
+The optional [standalone host replay](../tools/host_replay/README.md) requires no
+ROS on the source machine. It sends an additional UDP clock channel. Select
+`replay_clock_source:=udp` and explicit `clock_udp_bind_address` /
+`clock_udp_bind_port` on Jetson; `/replay_clock_bridge` then owns `/clock`.
+The default `replay_clock_source:=ros` retains the existing three-terminal run.
 
 Both containers use host networking, ROS 2 Humble, SDK 5.4.1,
 `ROS_DOMAIN_ID=42`, `ROS_LOCALHOST_ONLY=0`. Keep the host source playing while
@@ -31,7 +42,8 @@ ros2 topic info /clock --verbose
 ros2 topic echo /mavros/state --once
 ```
 
-For SVO, exactly one clock publisher must be `/zed_source/zed_node`. Jetson LR
+For SVO, exactly one clock publisher must be `/zed_source/zed_node` with the ROS
+source, or `/replay_clock_bridge` with standalone replay. Jetson LR
 and host RViz consume simulated time; the ZED NET receiver grabs on wall time
 and retains SDK IMAGE timestamps. Live NET uses wall time and ZED tracking.
 

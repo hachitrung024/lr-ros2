@@ -1,11 +1,24 @@
 # Host telemetry replay → Jetson MAVROS
 
+## Always-on alternative
+
+The [always-on live backend](always-on-live.md) runs NET + MAVROS without a
+Jetson database or `/clock`, and accepts the standalone simulator's
+`--time-mode live`. Keep using the commands below for the original
+recorded-time ROS replay and UDP-clock comparison paths.
+
 The Jetson backend always receives images over ZED NET. In SVO mode it runs
 MAVROS and estimates camera pose using only received sensor samples at or
 before each SVO timestamp. A separate DB process provides the fixed ENU origin
 and offline future reference path. The backend does not open a local SVO or
 publish pose from the DB.
 See [measured acceptance results](mavros-replay-validation.md).
+
+For a source machine without ROS, use the [standalone Python replay
+guide](../tools/host_replay/README.md). The ROS commands below remain the
+comparison baseline. Standalone replay adds an explicit UDP clock channel and
+uses `replay_clock_source:=udp` on Jetson; it retains the same NET/MAVLink
+endpoints and recorded telemetry semantics.
 
 ## Build and dependencies
 
@@ -151,7 +164,9 @@ Zero-filled magnetometer fields are not treated as measurements. Missing
 fields remain unknown, and invalid GPS fixes cannot generate a pose. Validate
 these unit assumptions before using a different recorder's database.
 
-`/clock` from the ZED source is the sole producer. Replay releases only records
+The ROS ZED source is the sole `/clock` publisher in the legacy route. In the
+standalone route, the source sends IMAGE timestamps over UDP and Jetson's
+`/replay_clock_bridge` alone publishes `/clock`. Replay releases only records
 at or before that clock. Mid-session startup and rewind prime at most two
 past samples per sensor within 1.5 seconds. A fixed session epoch and rounded
 SYSTEM_TIME pair define the boot-to-recording offset exactly. The
