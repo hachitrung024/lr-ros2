@@ -70,6 +70,7 @@ def test_live_resume_rejoins_images_without_reloading_model_and_fences_work(ros_
         def state(generation, ready):
             guard.on_state(String(data=json.dumps({
                 'generation': generation, 'ready': ready, 'start_ns': 1})))
+            guard.run_resume()
 
         previous = node._image_subscription
         state(1, True)

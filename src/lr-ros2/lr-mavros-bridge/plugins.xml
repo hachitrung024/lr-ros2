@@ -5,4 +5,7 @@
   <class name="lr_source_time" type="mavros::plugin::PluginFactoryTemplate&lt;lr_mavros_bridge::SourceTimePlugin&gt;" base_class_type="mavros::plugin::PluginFactory">
     <description>Live source sessions and effective MAVROS time calibration; never publishes clock.</description>
   </class>
+  <class name="lr_future_path" type="mavros::plugin::PluginFactoryTemplate&lt;lr_mavros_bridge::FuturePathPlugin&gt;" base_class_type="mavros::plugin::PluginFactory">
+    <description>Forward session-scoped LRFP path fragments from the existing FCU connection.</description>
+  </class>
 </library>

@@ -8,7 +8,9 @@ import time
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 from rclpy.clock import JumpThreshold
 from rclpy.duration import Duration
+from rclpy.executors import MultiThreadedExecutor
 from pathlib import Path
+from lr_mavros_bridge.prediction_guard import attach_prediction_guard, guarded
 
 from prediction_core.config import load_config
 from prediction_core.runtime import PredictionRuntime
@@ -178,6 +180,8 @@ class PredictionNode:
             self._types["output"], topic("prediction_output_topic"), reliable
         )
         self._node = node
+        self._source_guard = attach_prediction_guard(node, self._on_time_jump)
+        self._work_token = None
         self._diagnostics = node.create_publisher(
             DiagnosticArray, "/prediction/diagnostics", reliable
         )
@@ -197,6 +201,10 @@ class PredictionNode:
     def _publish_if_ready(self, result) -> None:
         if result.output is None or result.cycle_key is None:
             return
+        if self._source_guard is not None and (
+                self._active_trajectory is None or not self._source_guard.valid(
+                    self._active_trajectory.header.stamp, self._work_token)):
+            return
         message = RosAdapters.prediction_to_ros(
             result.output,
             source_trajectory_id=result.cycle_key.trajectory_id,
@@ -211,6 +219,9 @@ class PredictionNode:
         # PredictionCore uses wall time internally. ROS output must remain in
         # the node clock domain so SVO/sim-time consumers can synchronize it.
         message.header.stamp = self._node.get_clock().now().to_msg()
+        if self._source_guard is not None and not self._source_guard.valid(
+                self._active_trajectory.header.stamp, self._work_token):
+            return
         self._publisher.publish(message)
         self._output_count += 1
 
@@ -254,6 +265,7 @@ class PredictionNode:
         ]
         self._diagnostics.publish(message)
 
+    @guarded
     def _trajectory_callback(self, msg) -> None:
         try:
             stamp = stamp_ns(msg.header.stamp)
@@ -272,10 +284,12 @@ class PredictionNode:
         except Exception:
             LOGGER.exception("trajectory callback failed")
 
+    @guarded
     def _objects_callback(self, msg) -> None:
         self._objects_history.append(msg)
         self._refresh_inputs()
 
+    @guarded
     def _geometry_callback(self, msg) -> None:
         key = (
             msg.header.frame_id,
@@ -287,6 +301,7 @@ class PredictionNode:
             del self._geometries[next(iter(self._geometries))]
         self._refresh_inputs()
 
+    @guarded
     def _state_callback(self, msg) -> None:
         self._state_history.append(msg)
         self._refresh_inputs()
@@ -350,6 +365,7 @@ class PredictionNode:
                 else (0.9 * self._callback_ms_ema + 0.1 * self._callback_ms)
             )
 
+    @guarded
     def _external_wrench_callback(self, msg) -> None:
         try:
             result = self.runtime.on_external_wrenches(
@@ -361,7 +377,12 @@ class PredictionNode:
             LOGGER.exception("external wrench callback failed")
 
     def spin(self) -> None:
-        self._rclpy.spin(self._node)
+        executor = MultiThreadedExecutor(num_threads=2)
+        executor.add_node(self._node)
+        try:
+            executor.spin()
+        finally:
+            executor.shutdown()
 
     def destroy(self) -> None:
         self._node.destroy_node()

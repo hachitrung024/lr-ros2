@@ -11,7 +11,7 @@ from nav_msgs.msg import Path
 import rclpy
 from rclpy.clock import Clock, ClockType, JumpThreshold
 from rclpy.duration import Duration
-from rclpy.executors import ExternalShutdownException
+from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from rclpy.time import Time
@@ -22,6 +22,7 @@ from tf2_ros import Buffer, TransformException, TransformListener
 from vision_msgs.msg import Detection3DArray
 
 from lr_terrain_geometry.grid_map_sampling import GridMapSampler
+from lr_mavros_bridge.prediction_guard import attach_prediction_guard, guarded
 
 from .conversions import (
     StateConverter,
@@ -167,6 +168,11 @@ class PredictionBridgeNode(Node):
                 reliable,
             )
         self._roles = roles
+        self._source_guard = attach_prediction_guard(self, self._on_time_jump)
+        self._work_token = None
+        if self._source_guard and self._trajectory_converter:
+            # Remain distinct from cycles cached by other processes after respawn.
+            self._trajectory_converter.trajectory_id = time.time_ns()
         self._jump_handle = self.get_clock().create_jump_callback(
             JumpThreshold(
                 min_forward=None, min_backward=Duration(nanoseconds=-1), on_clock_change=True
@@ -208,10 +214,13 @@ class PredictionBridgeNode(Node):
             self._diag.publish(message)
             self._last_warning_time = now
 
+    @guarded
     def _on_path(self, message):
         try:
             trajectory = self._trajectory_converter.convert(message)
             if trajectory is not None:
+                if not self._valid_output(message.header.stamp):
+                    return
                 self._path_snapshot_pub.publish(self._trajectory_converter.path_snapshot)
                 self._trajectory_pub.publish(trajectory)
                 if 'geometry' in self._roles:
@@ -219,6 +228,7 @@ class PredictionBridgeNode(Node):
         except ValueError as error:
             self._warn(error)
 
+    @guarded
     def _on_trajectory(self, message):
         try:
             require_frame(message.header, self._frame)
@@ -228,6 +238,7 @@ class PredictionBridgeNode(Node):
         self._active_trajectory = message
         self._publish_geometry()
 
+    @guarded
     def _on_grid(self, message):
         try:
             require_frame(message.header, self._frame)
@@ -259,22 +270,33 @@ class PredictionBridgeNode(Node):
             flat_confidence=self._flat_conf,
         )
         # Empty coverage is still reported to the runtime as unknown, not flat.
+        if not self._valid_output(trajectory.header.stamp):
+            return
         self._geometry_pub.publish(output)
         self._last_geometry_key = key
 
+    def _valid_output(self, stamp):
+        return self._source_guard is None or self._source_guard.valid(stamp, self._work_token)
+
+    @guarded
     def _on_pose(self, message):
         try:
-            self._state_pub.publish(self._state_converter.convert(message))
+            state = self._state_converter.convert(message)
+            if self._valid_output(message.header.stamp):
+                self._state_pub.publish(state)
         except ValueError as error:
             self._warn(error)
 
+    @guarded
     def _on_detections(self, message):
         self._convert_detections(message, time.monotonic() + self._tf_timeout)
 
+    @guarded
     def _on_tracked_objects(self, message):
         try:
             _validate_tracked_objects(message, self._frame)
-            self._objects_pub.publish(message)
+            if self._valid_output(message.header.stamp):
+                self._objects_pub.publish(message)
         except ValueError as error:
             self._warn(error)
 
@@ -284,6 +306,7 @@ class PredictionBridgeNode(Node):
         for message, deadline in pending:
             self._convert_detections(message, deadline)
 
+    @guarded
     def _convert_detections(self, message, deadline):
         transform = {}
         try:
@@ -303,7 +326,8 @@ class PredictionBridgeNode(Node):
                 # A malformed non-empty batch must not turn into evidence of no objects.
                 self._warn(f'invalid detections: {stats.skipped_invalid}; batch dropped')
                 return
-            self._objects_pub.publish(output)
+            if self._valid_output(message.header.stamp):
+                self._objects_pub.publish(output)
         except TransformException as error:
             if time.monotonic() < deadline:
                 self._pending_detections.append((message, deadline))
@@ -406,9 +430,11 @@ def _segments_intersect(first, first_end, second, second_end):
 def run(role=None, argv=None):
     rclpy.init(args=argv)
     node = None
+    executor = MultiThreadedExecutor(num_threads=2)
     try:
         node = PredictionBridgeNode(role=role)
-        rclpy.spin(node)
+        executor.add_node(node)
+        executor.spin()
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
     except RuntimeError:
@@ -416,6 +442,7 @@ def run(role=None, argv=None):
         if rclpy.ok():
             raise
     finally:
+        executor.shutdown()
         if node is not None:
             node.destroy_node()
         if rclpy.ok():

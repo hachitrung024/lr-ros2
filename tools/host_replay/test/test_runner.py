@@ -112,7 +112,7 @@ def test_udp_system_time_and_causal_sensor_stamps(tmp_path):
         receiver.close()
 
 
-@pytest.mark.parametrize('mode', ['replay', 'live'])
+@pytest.mark.parametrize('mode', ['replay', 'live', 'live-path'])
 def test_copied_tool_replays_without_workspace_or_ros(tmp_path, mode):
     copied = tmp_path / 'standalone'
     shutil.copytree(Path(__file__).resolve().parents[1], copied,
@@ -144,7 +144,10 @@ raise SystemExit(main(sys.argv[1:]))
             '--svo-path', str(svo), '--mavlink-db-path', str(db), '--stream-port', '32000',
             '--mavlink-bind-address', '127.0.0.1', '--mavlink-bind-port', str(bind_port),
             '--mavlink-destination', '127.0.0.1',
-            '--mavlink-destination-port', str(mav_sink.getsockname()[1]), '--time-mode', mode]
+            '--mavlink-destination-port', str(mav_sink.getsockname()[1]), '--time-mode',
+            'live' if mode == 'live-path' else mode]
+    if mode == 'live-path':
+        args += ['--future-path']
     if mode == 'replay':
         args += ['--clock-destination', '127.0.0.1',
                  '--clock-destination-port', str(clock_sink.getsockname()[1])]
@@ -173,7 +176,7 @@ def test_runtime_failure_and_interrupt_close_all_resources(monkeypatch, failure,
         mavlink_bind_address='127.0.0.1', mavlink_bind_port=14550,
         mavlink_destination='127.0.0.1', mavlink_destination_port=14540,
         clock_destination='127.0.0.1', clock_destination_port=30010,
-        time_mode='replay',
+        time_mode='replay', future_path=False,
     ))
     monkeypatch.setattr(runner.signal, 'signal', lambda *_args: None)
     monkeypatch.setattr(runner, 'validate_recording', lambda _: (1, 2_000_000_000))

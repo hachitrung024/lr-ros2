@@ -27,6 +27,11 @@ class LiveRuntime(Node):
         self.stop_deadline = 0.0
         self.retry_at = 0.0
         self.started = self.last_raw = time.monotonic()
+        self.received_raw = False
+        self.camera_startup_timeout = float(self.declare_parameter(
+            'camera_startup_timeout_sec', 15.).value)
+        if not math.isfinite(self.camera_startup_timeout) or self.camera_startup_timeout <= 0:
+            raise ValueError('camera_startup_timeout_sec must be finite and positive')
         self.last_frame = 0.0
         self.state_seen = 0.0
         self.state = {}
@@ -93,6 +98,7 @@ class LiveRuntime(Node):
 
     def on_raw(self, _message):
         self.last_raw = time.monotonic()
+        self.received_raw = True
 
     def on_frame(self, _message):
         self.last_frame = time.monotonic()
@@ -104,6 +110,7 @@ class LiveRuntime(Node):
             sys.executable, '-m', 'lr_mavros_bridge.camera_child', str(os.getpid()), *command,
         ], start_new_session=True)
         self.started = self.last_raw = time.monotonic()
+        self.received_raw = False
         self.get_logger().info(f'NET receiver started, PID={self.child.pid}')
 
     def stop_camera(self):
@@ -130,9 +137,15 @@ class LiveRuntime(Node):
                 pass
         if self.child is None and now >= self.retry_at and self.was_synced:
             self.launch_camera()
-        if self.child is not None and not self.stopping and now - self.last_raw > 5.0:
+        # Loading the wrapper/SDK can exceed the steady-state 5 s watchdog,
+        # especially while prediction processes are active. Require real raw
+        # data before reporting readiness; give initialization its own bound.
+        silent = (now - self.last_raw > 5.0 if self.received_raw else
+                  now - self.started > self.camera_startup_timeout)
+        if self.child is not None and not self.stopping and silent:
             self.stop_camera()
-        healthy = (self.was_synced and self.child is not None and now - self.state_seen < 2.0
+        healthy = (self.was_synced and self.received_raw and self.child is not None
+                   and now - self.state_seen < 2.0
                    and now - self.last_raw < 2.0 and not self.stopping)
         if self.ready and not healthy:
             self.boundary('waiting_source')

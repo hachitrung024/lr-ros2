@@ -459,10 +459,11 @@ class BoxEstimator3DNode(Node):
             self._on_time_jump(None)
 
     def _on_source_resume(self):
+        from lr_mavros_bridge.source_guard import retire_subscription
         with self._live_state_lock:
             self._camera_info = None
-            self.destroy_subscription(self._depth_subscription)
-            self.destroy_subscription(self._camera_info_subscription)
+            retire_subscription(self, self._depth_subscription)
+            retire_subscription(self, self._camera_info_subscription)
             self._depth_subscription = self.create_subscription(
                 Image, str(self._depth_topic), self._on_depth,
                 self._input_image_qos(self._depth_reliability))

@@ -137,7 +137,8 @@ class SegmentationNode(Node):
 
     def _on_source_resume(self):
         # Rejoin the new writer after a NET container exit. Keep the loaded model.
-        self.destroy_subscription(self._image_subscription)
+        from lr_mavros_bridge.source_guard import retire_subscription
+        retire_subscription(self, self._image_subscription)
         self._image_subscription = self.create_subscription(
             Image, self._image_topic, self._on_image, self._image_qos)
 

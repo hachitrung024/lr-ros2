@@ -357,8 +357,9 @@ class TerrainGeometryNode(Node):
         self.get_logger().info("ROS time changed; cleared terrain TF cache and estimator state.")
 
     def _on_source_resume(self):
+        from lr_mavros_bridge.source_guard import retire_subscription
         with self._state_lock:
-            self.destroy_subscription(self._cloud_subscription)
+            retire_subscription(self, self._cloud_subscription)
             self._cloud_subscription = self.create_subscription(
                 PointCloud2, self._point_cloud_topic, self._on_point_cloud,
                 QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT))

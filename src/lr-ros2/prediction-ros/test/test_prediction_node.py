@@ -98,3 +98,37 @@ def test_diagnostics_identify_the_waiting_cycle(node):
     node._publish_diagnostics()
     values = {v.key: v.value for v in messages[-1].status[0].values}
     assert values['trajectory_id'] == '42'
+
+
+def test_source_changes_during_physics_do_not_publish_old_result(node):
+    import json
+    from nav_msgs.msg import Path as RosPath
+    from geometry_msgs.msg import PoseStamped
+    from rclpy.time import Time as ClockTime
+    from std_msgs.msg import String
+    from lr_mavros_bridge.prediction_guard import PredictionGuard
+
+    node._node.get_clock().set_ros_time_override(ClockTime(seconds=10))
+    guard = PredictionGuard(node._node, node._on_time_jump)
+    node._source_guard = guard
+    def generation(value, start):
+        guard.source.on_state(String(data=json.dumps({
+            'runtime_id': 'runtime', 'generation': value, 'ready': True, 'start_ns': start})))
+    generation(1, 1)
+    guard.on_path(RosPath(header=header(10), poses=[PoseStamped(), PoseStamped()]))
+    trajectory, geometry = inputs()
+    node._objects_callback(TrackedObjectArray(header=header(10)))
+    node._state_callback(RoverState(header=header(10), acceleration_valid=True))
+    node._trajectory_callback(trajectory)
+    compute = node.runtime.on_geometry
+    def changed_during_computation(*args, **kwargs):
+        result = compute(*args, **kwargs)
+        generation(2, 10_000_000_001)
+        return result
+    node.runtime.on_geometry = changed_during_computation
+    node._geometry_callback(geometry)
+    assert not node.outputs
+    guard.poll()
+    assert node._active_trajectory is None and not node._geometries
+    node._objects_callback(TrackedObjectArray(header=header(10)))
+    assert not node.outputs

@@ -35,7 +35,7 @@ def launch_setup(context):
                  'replay_clock_source', 'clock_udp_bind_address', 'clock_udp_bind_port',
                  'use_sim_time', 'start_path_prediction_node'}
     if forbidden.intersection(context.launch_configurations):
-        raise ValueError('headless_live does not accept DB, replay, prediction or clock arguments')
+        raise ValueError('headless_live does not accept DB, replay or clock arguments')
     camera, model = value('camera_name'), value('camera_model')
     if model not in {'zed', 'zedm', 'zed2', 'zed2i', 'zedx', 'zedxm', 'zedxnano',
                      'zedxhdr', 'zedxhdrmini', 'zedxhdrmax', 'virtual'}:
@@ -54,6 +54,15 @@ def launch_setup(context):
     if model_path and not Path(model_path).is_file():
         raise ValueError('segmentation_model_path must be an existing model')
     frame = value('map_frame')
+    prediction_value = value('prediction_enabled').lower()
+    if prediction_value not in ('true', 'false'):
+        raise ValueError('prediction_enabled must be true or false')
+    prediction = prediction_value == 'true'
+    if prediction and not model_path:
+        raise ValueError('prediction_enabled requires segmentation_model_path')
+    profile = value('prediction_profile')
+    if profile not in ('static', 'dynamic'):
+        raise ValueError('prediction_profile must be static or dynamic')
     common = {'use_sim_time': False}
 
     def config(package, filename):
@@ -99,13 +108,37 @@ def launch_setup(context):
                     'input.camera_info_topic': sensor + 'rgb/color/rect/camera_info',
                 }]),
         ])
+    if prediction:
+        guard = {**common, 'source_guard_enabled': True,
+                 'live_path_topic': '/lr/future_path/mavlink'}
+        nodes.extend([
+            node('lr_mavros_bridge', 'mavlink_future_path', parameters=[{
+                **common, 'map_frame': frame, 'body_to_camera': mount,
+            }]),
+            node('lr_prediction_bridge', 'prediction_bridge_node', parameters=[
+                config('lr_prediction_bridge', 'bridge.yaml'), {
+                    **guard, 'prediction_profile': profile, 'expected_frame_id': frame,
+                    'trajectory.input_topic': '/lr/future_path/mavlink',
+                }]),
+            node('prediction_ros', 'prediction_node', parameters=[
+                config('prediction_ros', 'prediction.yaml'), {
+                    **guard, 'prediction_profile': profile, 'expected_frame_id': frame,
+                    'config_path': value('rover_config') or config(
+                        'prediction_core', 'rover.reference.yaml'),
+                }]),
+            node('lr_path_prediction', 'canonical_prediction_visualizer_node', parameters=[
+                config('lr_path_prediction', 'path_prediction.yaml'), {
+                    **guard, 'frames.map_frame': frame,
+                }]),
+        ])
     return nodes
 
 
 def generate_launch_description():
     required = ('camera_model', 'stream_address', 'stream_port', 'mavros_fcu_url')
     defaults = {'camera_name': 'zed', 'map_frame': 'map', 'segmentation_model_path': '',
-                'mavlink_body_to_camera': '[0,0,0,0,0,0]', 'mavros_audit_file': ''}
+                'mavlink_body_to_camera': '[0,0,0,0,0,0]', 'mavros_audit_file': '',
+                'prediction_enabled': 'false', 'prediction_profile': 'static', 'rover_config': ''}
     return LaunchDescription([
         *(DeclareLaunchArgument(name) for name in required),
         *(DeclareLaunchArgument(name, default_value=v) for name, v in defaults.items()),

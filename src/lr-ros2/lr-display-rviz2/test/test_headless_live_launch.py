@@ -54,6 +54,23 @@ def test_live_launch_is_wall_time_without_db_clock_or_prediction():
     assert evaluate_parameters(ctx, nodes[-1]._Node__parameters)[-1]['corridor.enabled'] is False
 
 
+def test_prediction_requires_segmentation_and_uses_only_mavlink_path(tmp_path):
+    with pytest.raises(ValueError, match='segmentation_model_path'):
+        load().launch_setup(context(prediction_enabled='true'))
+    model = tmp_path / 'model.pt'
+    model.touch()
+    ctx = context(prediction_enabled='true', segmentation_model_path=str(model))
+    nodes = load().launch_setup(ctx)
+    assert [str(n.node_executable) for n in nodes][-4:] == [
+        'mavlink_future_path', 'prediction_bridge_node', 'prediction_node',
+        'canonical_prediction_visualizer_node']
+    for node in nodes[-3:]:
+        params = evaluate_parameters(ctx, node._Node__parameters)[-1]
+        assert params['use_sim_time'] is False and params['source_guard_enabled'] is True
+    assert evaluate_parameters(ctx, nodes[-3]._Node__parameters)[-1][
+        'trajectory.input_topic'] == '/lr/future_path/mavlink'
+
+
 @pytest.mark.parametrize('override', [
     {'stream_port': '30001'}, {'mavros_fcu_url': ''}, {'mavlink_db_path': '/tmp/replay.db'},
     {'use_sim_time': 'true'}, {'future_path': 'true'},

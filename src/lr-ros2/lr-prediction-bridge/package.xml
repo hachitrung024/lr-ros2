@@ -16,6 +16,7 @@
   <exec_depend>rclpy</exec_depend>
   <exec_depend>diagnostic_msgs</exec_depend>
   <exec_depend>lr_terrain_geometry</exec_depend>
+  <exec_depend>lr_mavros_bridge</exec_depend>
   <exec_depend>std_msgs</exec_depend>
   <exec_depend>geometry_msgs</exec_depend>
   <exec_depend>nav_msgs</exec_depend>

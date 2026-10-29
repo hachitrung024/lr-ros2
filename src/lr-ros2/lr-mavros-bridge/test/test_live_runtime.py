@@ -36,6 +36,32 @@ def test_empty_startup_descriptor_does_not_retire_active_session():
     assert boundaries.count('new_session') == 2
 
 
+def test_camera_initialization_is_not_a_stalled_stream():
+    import rclpy
+    rclpy.init()
+    runtime = LiveRuntime()
+    try:
+        now = time.monotonic()
+        runtime.child = SimpleNamespace(poll=lambda: None)
+        runtime.was_synced = True
+        runtime.state_seen = now
+        runtime.started = runtime.last_raw = now - 6.
+        stops = []
+        runtime.stop_camera = lambda: stops.append(1)
+        runtime.poll()
+        assert not stops and not runtime.ready
+        runtime.on_raw(None)
+        runtime.poll()
+        assert runtime.ready
+        runtime.last_raw = now - 6.
+        runtime.poll()
+        assert stops == [1] and not runtime.ready
+    finally:
+        runtime.child = None
+        runtime.destroy_node()
+        rclpy.shutdown()
+
+
 def test_camera_child_exits_when_supervisor_is_killed():
     code = '''
 import os,subprocess,sys,time
@@ -49,7 +75,7 @@ time.sleep(60)
     def running():
         try:
             return Path(f'/proc/{child}/stat').read_text().split()[2] != 'Z'
-        except FileNotFoundError:
+        except (FileNotFoundError, ProcessLookupError):
             return False
     try:
         deadline = time.monotonic() + 3

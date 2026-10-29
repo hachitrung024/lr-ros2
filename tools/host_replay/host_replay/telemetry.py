@@ -1,12 +1,14 @@
 """UDP MAVLink transport and explicit recording coverage validation."""
 
 from pathlib import Path
+from collections import deque
 import socket
 import sqlite3
 import time
 from urllib.parse import quote
 
 from .live import PAYLOAD_TYPE
+from .path_protocol import PAYLOAD_TYPE as PATH_PAYLOAD_TYPE
 from .records import Record, encode
 
 
@@ -40,10 +42,16 @@ def validate_recording(path):
 class TelemetrySender:
     """Retain the baseline replay epoch, units and supported discovery replies."""
 
-    def __init__(self, recording, bind_address, bind_port, destination, port, *, live=None):
+    def __init__(self, recording, bind_address, bind_port, destination, port, *, live=None,
+                 future_path=None):
         from pymavlink.dialects.v20 import common as mavlink
         self.recording = recording
         self.live = live
+        if future_path is not None and live is None:
+            raise ValueError('Future path transport requires live calibration')
+        self.future_path = future_path
+        self.path_pending = deque()
+        self.path_packets_sent = 0
         self.next_session = 0.0
         self.protocol = mavlink
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -108,6 +116,12 @@ class TelemetrySender:
                     target_system=request.get_srcSystem(),
                     target_component=request.get_srcComponent(),
                 )
+        # Bounded work per tick: path fragments cannot starve TIMESYNC or heartbeat.
+        for _ in range(min(4, len(self.path_pending))):
+            packet = self.path_pending.popleft()
+            self.mav.tunnel_send(0, 0, PATH_PAYLOAD_TYPE, len(packet),
+                                 list(packet.ljust(128, b'\0')))
+            self.path_packets_sent += 1
 
     def send_frame(self, stamp_ns):
         """Emit SYSTEM_TIME and only the bounded past/current sensor batch."""
@@ -133,6 +147,11 @@ class TelemetrySender:
             if message is not None:
                 self.mav.send(message)
                 self.sent += 1
+        if self.future_path is not None:
+            packets = self.future_path.prepare(stamp_ns, self.live)
+            if packets is not None:
+                # Replace unsent work instead of accumulating stale snapshots.
+                self.path_pending = deque(packets)
 
     def close(self):
         self.socket.close()

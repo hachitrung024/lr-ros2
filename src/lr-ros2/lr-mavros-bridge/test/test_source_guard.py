@@ -34,12 +34,14 @@ def test_old_inflight_work_and_stale_source_are_rejected():
 
 
 def test_resume_rejoins_readers_once_per_readiness_transition():
-    node = SimpleNamespace(create_subscription=lambda *_a, **_k: None)
+    node = SimpleNamespace(create_subscription=lambda *_a, **_k: None,
+                           create_timer=lambda *_a: None)
     resumed = []
     guard = SourceGuard(node, lambda _: None, lambda: resumed.append(1))
     def send(generation, ready):
         guard.on_state(String(data=json.dumps({'generation': generation, 'ready': ready,
                                                'start_ns': 1})))
+        guard.run_resume()
     send(1, False)
     send(1, True)
     send(1, True)
@@ -51,3 +53,14 @@ def test_resume_rejoins_readers_once_per_readiness_transition():
     send(2, False)
     send(2, True)
     assert len(resumed) == 3
+
+
+def test_retired_subscription_rejects_already_queued_executor_work():
+    from lr_mavros_bridge.source_guard import retire_subscription
+    destroyed = []
+    node = SimpleNamespace(destroy_subscription=destroyed.append)
+    reader = SimpleNamespace(callback_group=None)
+    retire_subscription(node, reader)
+    assert destroyed == [reader]
+    assert not reader.callback_group.can_execute(reader)
+    assert not reader.callback_group.beginning_execution(reader)

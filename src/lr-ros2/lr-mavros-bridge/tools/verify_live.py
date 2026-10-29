@@ -12,6 +12,8 @@ import time
 from ament_index_python.packages import get_package_prefix
 from geometry_msgs.msg import PoseStamped
 from grid_map_msgs.msg import GridMap
+from nav_msgs.msg import Path as PathMessage
+from safety_perception_msgs.msg import PredictionOutput, Trajectory
 import rclpy
 from rclpy.qos import qos_profile_sensor_data, QoSProfile, DurabilityPolicy
 from sensor_msgs.msg import CameraInfo, Image, PointCloud2
@@ -28,6 +30,7 @@ def main():
     parser.add_argument('--timeout', type=float, default=60)
     parser.add_argument('--output', required=True)
     parser.add_argument('--without-segmentation', action='store_true')
+    parser.add_argument('--with-prediction', action='store_true')
     args = parser.parse_args()
     rclpy.init()
     node = rclpy.create_node('verify_live_net')
@@ -55,6 +58,18 @@ def main():
         ('overlay', Image, '/segmentation/overlay'),
     ):
         node.create_subscription(kind, topic, lambda m, n=name: sensor(n, m), qos_profile_sensor_data)
+    if args.with_prediction:
+        for name, kind, topic in (
+            ('future_path', PathMessage, '/lr/future_path/mavlink'),
+            ('trajectory', Trajectory, '/trajectory'),
+            ('prediction', PredictionOutput, '/predict_output'),
+            ('reference_path', PathMessage, '/lr/path_prediction/reference_path'),
+        ):
+            def path_product(message, key=name):
+                if hasattr(message, 'poses') and len(message.poses) < 2:
+                    return
+                sensor(key, message)
+            node.create_subscription(kind, topic, path_product, qos_profile_sensor_data)
     def terrain(_message):
         if 'state' not in _message.layers:
             return
@@ -77,6 +92,8 @@ def main():
     required = ['rgb', 'cloud', 'pose', 'terrain']
     if not args.without_segmentation:
         required.append('overlay')
+    if args.with_prediction:
+        required.extend(['future_path', 'trajectory', 'prediction', 'reference_path'])
     began = time.monotonic()
     deadline = began + args.timeout
     while not all(counts[k] for k in required) and time.monotonic() < deadline:
@@ -105,7 +122,8 @@ def main():
         'all_outputs': all(counts[k] for k in required),
         'no_clock_publisher': node.count_publishers('/clock') == 0,
         'no_ground_truth': node.count_publishers('/lr/future_path/ground_truth') == 0,
-        'no_prediction': node.count_publishers('/predict_output') == 0,
+        'prediction_publishers': node.count_publishers('/predict_output') == (
+            1 if args.with_prediction else 0),
         'one_camera_tf_owner': tf_report['passed'],
         'rgb_cloud_shared_stamps': len(stamps['rgb'] & stamps['cloud']) > 5,
         'pose_frame_shared_stamps': len(stamps['pose'] & stamps['rgb']) > 5,

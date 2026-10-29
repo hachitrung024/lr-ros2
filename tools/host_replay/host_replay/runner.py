@@ -1,6 +1,7 @@
 """One monotonic scheduler for SVO frames, replay clock and causal telemetry."""
 
 import argparse
+import math
 from contextlib import ExitStack
 from pathlib import Path
 import signal
@@ -9,6 +10,7 @@ import sys
 import time
 
 from .clock import ClockSender
+from .future_path import FuturePath
 from .live import LiveTime
 from .records import Recording
 from .source import SvoSource
@@ -35,11 +37,22 @@ def arguments(argv=None):
     parser.add_argument('--clock-destination')
     parser.add_argument('--clock-destination-port', type=port)
     parser.add_argument('--play-from-frame', type=int, default=0)
+    parser.add_argument('--future-path', action='store_true',
+                        help='send DB look-ahead over the existing MAVLink socket (live only)')
+    parser.add_argument('--future-path-radius-m', type=float, default=15.)
+    parser.add_argument('--future-path-step-m', type=float, default=.2)
+    parser.add_argument('--future-path-rate-hz', type=float, default=5.)
     args = parser.parse_args(argv)
     if args.stream_port % 2 or args.stream_port > 65534:
         parser.error('--stream-port must be even and in [2, 65534]')
     if args.play_from_frame < 0:
         parser.error('--play-from-frame must be non-negative')
+    if args.future_path and args.time_mode != 'live':
+        parser.error('--future-path requires --time-mode live')
+    if not all(math.isfinite(v) and v > 0 for v in (
+            args.future_path_radius_m, args.future_path_step_m, args.future_path_rate_hz)) or (
+                args.future_path_rate_hz > 5.):
+        parser.error('path radius/step/rate must be positive; rate must be <= 5 Hz')
     if args.time_mode == 'replay' and (
             not args.clock_destination or args.clock_destination_port is None):
         parser.error('replay requires --clock-destination and --clock-destination-port')
@@ -93,6 +106,10 @@ def main(argv=None):
                 raise ValueError('The selected MAVLink DB does not cover the first SVO timestamp')
             live = LiveTime(source.stamp_ns) if args.time_mode == 'live' else None
             options = {'live': live} if live is not None else {}
+            if args.future_path:
+                options['future_path'] = FuturePath(
+                    recording, radius_m=args.future_path_radius_m,
+                    step_m=args.future_path_step_m, rate_hz=args.future_path_rate_hz)
             telemetry = TelemetrySender(
                 recording, args.mavlink_bind_address, args.mavlink_bind_port,
                 args.mavlink_destination, args.mavlink_destination_port, **options,

@@ -10,7 +10,7 @@ from nav_msgs.msg import Path
 import rclpy
 from rclpy.clock import Clock, ClockType, JumpThreshold
 from rclpy.duration import Duration
-from rclpy.executors import ExternalShutdownException
+from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from safety_perception_msgs.msg import (
@@ -23,6 +23,7 @@ from std_msgs.msg import Header
 from visualization_msgs.msg import Marker, MarkerArray
 
 from lr_terrain_geometry.grid_map_sampling import TerrainSample
+from lr_mavros_bridge.prediction_guard import attach_prediction_guard, guarded
 from .presentation import StepPrediction
 from .path_snapshot import stamp_ns, validate_snapshot
 from .outputs import (
@@ -190,6 +191,7 @@ class CanonicalPredictionVisualizerNode(Node):
             ),
             post_callback=self._on_time_jump,
         )
+        self._source_guard = attach_prediction_guard(self, self._on_time_jump)
         self.get_logger().info(
             "canonical prediction visualization: %s + %s + %s -> %s + %s"
             % (
@@ -242,16 +244,19 @@ class CanonicalPredictionVisualizerNode(Node):
         if self._slope_critical_deg < self._slope_warning_deg:
             raise ValueError("critical slope must be at least warning slope")
 
+    @guarded
     def _on_trajectory(self, message: Trajectory) -> None:
         self._trajectories[int(message.trajectory_id)] = message
         self._trim_cache(self._trajectories)
         self._flush_pending()
 
+    @guarded
     def _on_geometry(self, message: GeometryArray) -> None:
         self._geometries[int(message.source_trajectory_id)] = message
         self._trim_cache(self._geometries)
         self._flush_pending()
 
+    @guarded
     def _on_prediction(self, message: PredictionOutput) -> None:
         if message.header.frame_id != self._map_frame:
             self._warn('Prediction frame mismatch')
@@ -266,6 +271,7 @@ class CanonicalPredictionVisualizerNode(Node):
         self._prediction_ready = True
         self._flush_pending()
 
+    @guarded
     def _on_path_snapshot(self, message: TrajectoryPath) -> None:
         try:
             validate_snapshot(message, self._map_frame)
@@ -290,6 +296,10 @@ class CanonicalPredictionVisualizerNode(Node):
         ) else None
 
     def _flush_pending(self) -> None:
+        if self._source_guard is not None:
+            self._source_guard.poll()
+            if not self._source_guard.available():
+                return
         available = {
             k for k, snapshot in self._snapshots.items()
             if k in self._trajectories and k >= self._displayed_cycle
@@ -387,6 +397,9 @@ class CanonicalPredictionVisualizerNode(Node):
         # runtime output stamp represents completion time and can lag the raw
         # future path by one or more SVO frames.
         header = Header(stamp=trajectory.header.stamp, frame_id=self._map_frame)
+        if self._source_guard is not None and not self._source_guard.valid(
+                trajectory.header.stamp, self._work_token):
+            return False
         if self._steps_publisher.get_subscription_count():
             self._steps_publisher.publish(
                 predictions_to_diagnostics(
@@ -597,12 +610,15 @@ def main(args=None) -> None:
     """Run the canonical prediction visualizer node."""
     rclpy.init(args=args)
     node = None
+    executor = MultiThreadedExecutor(num_threads=2)
     try:
         node = CanonicalPredictionVisualizerNode()
-        rclpy.spin(node)
+        executor.add_node(node)
+        executor.spin()
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
+        executor.shutdown()
         if node is not None:
             node.destroy_node()
         if rclpy.ok():
