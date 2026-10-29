@@ -4,6 +4,15 @@ import math
 from pathlib import Path
 
 
+class SvoEnd(RuntimeError):
+    """The SDK reports EOF at a requested position inside its advertised range."""
+
+    def __init__(self, total_frames, fps):
+        """Retain metadata so the terminal can remain available at EOF."""
+        super().__init__('SVO has no frame at the selected position')
+        self.total_frames, self.fps = total_frames, fps
+
+
 class SvoSource:
     """Own one SVO and NET encoder; never seek after the selected start frame."""
 
@@ -47,7 +56,7 @@ class SvoSource:
             self.runtime = sdk.RuntimeParameters()
             self.runtime.enable_depth = False
             if not self.tick():
-                raise RuntimeError('SVO has no frame at the selected position')
+                raise SvoEnd(self.total_frames, self.fps)
         except BaseException:
             self.close()
             raise

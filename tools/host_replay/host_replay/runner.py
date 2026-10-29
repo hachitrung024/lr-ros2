@@ -12,12 +12,14 @@ import time
 from .clock import ClockSender
 from .future_path import FuturePath
 from .live import LiveTime
+from .interactive import HELP, LivePlayback, TerminalCommands
 from .records import Recording
 from .source import SvoSource
 from .telemetry import TelemetrySender, validate_recording
 
 
 def port(value):
+    """Parse an explicit UDP endpoint port."""
     number = int(value)
     if not 1 <= number <= 65535:
         raise argparse.ArgumentTypeError('port must be in [1, 65535]')
@@ -25,6 +27,7 @@ def port(value):
 
 
 def arguments(argv=None):
+    """Validate source, transport and playback-mode arguments."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--svo-path', required=True)
     parser.add_argument('--mavlink-db-path', required=True)
@@ -37,6 +40,11 @@ def arguments(argv=None):
     parser.add_argument('--clock-destination')
     parser.add_argument('--clock-destination-port', type=port)
     parser.add_argument('--play-from-frame', type=int, default=0)
+    controls = parser.add_mutually_exclusive_group()
+    controls.add_argument('--interactive', action='store_true',
+                          help='terminal seek/skip/pause/resume controls (live mode only)')
+    controls.add_argument('--gui', action='store_true',
+                          help='open a playback window with a seek slider (live mode only)')
     parser.add_argument('--future-path', action='store_true',
                         help='send DB look-ahead over the existing MAVLink socket (live only)')
     parser.add_argument('--future-path-radius-m', type=float, default=15.)
@@ -47,6 +55,8 @@ def arguments(argv=None):
         parser.error('--stream-port must be even and in [2, 65534]')
     if args.play_from_frame < 0:
         parser.error('--play-from-frame must be non-negative')
+    if (args.interactive or args.gui) and args.time_mode != 'live':
+        parser.error('--interactive/--gui require --time-mode live')
     if args.future_path and args.time_mode != 'live':
         parser.error('--future-path requires --time-mode live')
     if not all(math.isfinite(v) and v > 0 for v in (
@@ -65,7 +75,8 @@ def arguments(argv=None):
     return args
 
 
-def run(source, telemetry, clock=None, *, monotonic=time.monotonic, sleep=time.sleep):
+def run(source, telemetry, clock=None, *, monotonic=time.monotonic, sleep=time.sleep,
+        poll=None):
     """Emit each frame once, with clock before telemetry and no catch-up bursts."""
     frames = 0
     deadline = monotonic()
@@ -82,13 +93,30 @@ def run(source, telemetry, clock=None, *, monotonic=time.monotonic, sleep=time.s
         if deadline <= now:
             deadline = now + source.period
         while monotonic() < deadline:
+            if poll is not None and poll():
+                return frames
             telemetry.service()
             sleep(max(0.0, min(0.01, deadline - monotonic())))
         if not source.tick():
             return frames
 
 
+def run_controlled(player, commands):
+    """Use the same session lifecycle for terminal and graphical controls."""
+    player.start(player.args.play_from_frame)
+    while not player.quitting:
+        if player.source is None:
+            player.poll(commands)
+            time.sleep(.01)
+        else:
+            source = player.source
+            run(source, player.telemetry, poll=lambda: player.poll(commands))
+            if player.source is source and source.ended:
+                player.stop(ended=True)
+
+
 def main(argv=None):
+    """Run sequential playback or the live terminal controller."""
     args = arguments(argv)
 
     def interrupted(_signum, _frame):
@@ -99,6 +127,16 @@ def main(argv=None):
         coverage = validate_recording(args.mavlink_db_path)
         recording = Recording(Path(args.mavlink_db_path).expanduser())
         with ExitStack() as resources:
+            if args.gui:
+                from .gui import run_gui
+                return run_gui(args, recording, coverage, run_controlled)
+            if args.interactive:
+                commands = TerminalCommands()
+                player = LivePlayback(args, recording, coverage)
+                resources.callback(player.close)
+                print(HELP, flush=True)
+                run_controlled(player, commands)
+                return 0
             source = SvoSource(args.svo_path, args.stream_port, args.play_from_frame)
             resources.callback(source.close)
             # Match the existing explicit-DB selection tolerance, including mid-session joins.

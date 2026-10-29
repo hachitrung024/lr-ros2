@@ -38,6 +38,10 @@ class Recording:
         self.records.sort(key=lambda r: (r.stamp_us, r.kind == "attitude", r.kind))
         self.stamps = [r.stamp_us for r in self.records]
         self.epoch_us = self.stamps[0] // 1_000_000 * 1_000_000
+        self.reset()
+
+    def reset(self):
+        """Prime at the next image without replaying samples skipped by a seek."""
         self.cursor = None
         self.last_clock_us = None
 

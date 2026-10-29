@@ -1,6 +1,7 @@
 """Check one scheduler, wire timing and a copied tool with ROS imports denied."""
 
 import json
+import importlib.util
 import os
 from pathlib import Path
 import shutil
@@ -112,8 +113,11 @@ def test_udp_system_time_and_causal_sensor_stamps(tmp_path):
         receiver.close()
 
 
-@pytest.mark.parametrize('mode', ['replay', 'live', 'live-path'])
+@pytest.mark.parametrize('mode', ['replay', 'live', 'live-path', 'interactive', 'gui'])
 def test_copied_tool_replays_without_workspace_or_ros(tmp_path, mode):
+    if mode == 'gui' and (not os.environ.get('DISPLAY') or
+                          importlib.util.find_spec('tkinter') is None):
+        pytest.skip('GUI needs Tk and a display')
     copied = tmp_path / 'standalone'
     shutil.copytree(Path(__file__).resolve().parents[1], copied,
                     ignore=shutil.ignore_patterns('__pycache__', '.pytest_cache'))
@@ -138,6 +142,13 @@ pyzed.sl = fake_sdk()
 sys.modules['pyzed'] = pyzed
 sys.modules['pyzed.sl'] = pyzed.sl
 from host_replay.runner import main
+if '--gui' in sys.argv:
+    from host_replay.gui import PlaybackWindow
+    original_start = PlaybackWindow.start
+    def start_and_close(self):
+        original_start(self)
+        self.root.after(350, self.close)
+    PlaybackWindow.start = start_and_close
 raise SystemExit(main(sys.argv[1:]))
 '''
     args = [sys.executable, '-I', '-c', script, str(copied),
@@ -145,17 +156,25 @@ raise SystemExit(main(sys.argv[1:]))
             '--mavlink-bind-address', '127.0.0.1', '--mavlink-bind-port', str(bind_port),
             '--mavlink-destination', '127.0.0.1',
             '--mavlink-destination-port', str(mav_sink.getsockname()[1]), '--time-mode',
-            'live' if mode == 'live-path' else mode]
-    if mode == 'live-path':
+            'live' if mode in ('live-path', 'interactive', 'gui') else mode]
+    if mode in ('live-path', 'interactive', 'gui'):
         args += ['--future-path']
+    if mode == 'interactive':
+        args += ['--interactive']
+    if mode == 'gui':
+        args += ['--gui']
     if mode == 'replay':
         args += ['--clock-destination', '127.0.0.1',
                  '--clock-destination-port', str(clock_sink.getsockname()[1])]
     try:
         result = subprocess.run(args, cwd=tmp_path, capture_output=True, text=True, timeout=10,
+                                input=('status\nseek 3\npause\nseek 0\nresume\nquit\n'
+                                       if mode == 'interactive' else None),
                                 env={k: v for k, v in os.environ.items() if k != 'PYTHONPATH'})
         assert result.returncode == 0, result.stdout + result.stderr
-        assert 'EOF: 4 frames' in result.stdout
+        if mode != 'gui':
+            assert ('paused:' if mode == 'interactive' else 'EOF: 4 frames') in result.stdout
+        assert 'Control failed:' not in result.stderr
     finally:
         mav_sink.close()
         clock_sink.close()
@@ -164,6 +183,17 @@ raise SystemExit(main(sys.argv[1:]))
 def test_no_network_endpoint_defaults_and_invalid_arguments():
     with pytest.raises(SystemExit):
         arguments([])
+
+
+@pytest.mark.parametrize('controls', [['--gui'], ['--gui', '--interactive']])
+def test_gui_controls_reject_replay_and_conflicting_interfaces(controls):
+    with pytest.raises(SystemExit):
+        arguments(controls + [
+            '--svo-path', 'x', '--mavlink-db-path', 'y', '--stream-port', '32000',
+            '--mavlink-bind-address', '127.0.0.1', '--mavlink-bind-port', '14550',
+            '--mavlink-destination', '127.0.0.1', '--mavlink-destination-port', '14540',
+            '--clock-destination', '127.0.0.1', '--clock-destination-port', '30010',
+        ])
 
 
 @pytest.mark.parametrize('failure, expected', [(RuntimeError('capture failed'), 1),
@@ -176,7 +206,7 @@ def test_runtime_failure_and_interrupt_close_all_resources(monkeypatch, failure,
         mavlink_bind_address='127.0.0.1', mavlink_bind_port=14550,
         mavlink_destination='127.0.0.1', mavlink_destination_port=14540,
         clock_destination='127.0.0.1', clock_destination_port=30010,
-        time_mode='replay', future_path=False,
+        time_mode='replay', future_path=False, interactive=False, gui=False,
     ))
     monkeypatch.setattr(runner.signal, 'signal', lambda *_args: None)
     monkeypatch.setattr(runner, 'validate_recording', lambda _: (1, 2_000_000_000))

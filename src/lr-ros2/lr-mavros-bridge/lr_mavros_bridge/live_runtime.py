@@ -85,6 +85,12 @@ class LiveRuntime(Node):
                 self.start_ns = (int(state['boot_anchor_ns']) + offset) if session else (
                     self.get_clock().now().nanoseconds)
                 self.boundary('new_session')
+                if session and self.child is not None:
+                    # NET frames carry no source session ID. Recreate the receiver
+                    # before accepting images from a seek/restarted encoder.
+                    self.received_raw = False
+                    self.last_frame = 0.0
+                    self.stop_camera()
             if self.was_synced and not synced:
                 self.boundary('waiting_mavlink')
             if synced and not self.was_synced:

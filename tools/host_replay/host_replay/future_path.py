@@ -48,8 +48,7 @@ class FuturePath:
             raise ValueError('Invalid future path radius, step or rate')
         self.radius, self.step = radius_m, step_m
         self.period_ns = round(1e9 / rate_hz)
-        self.next_stamp = 0
-        self.sequence = 0
+        self.reset()
         self.gps, self.attitude = [], []
         for record in recording.records:
             v = record.values
@@ -72,6 +71,11 @@ class FuturePath:
         self.origin_ecef = ecef(origin)
         self.lat, self.lon = map(math.radians, origin[:2])
         self.positions = [self.enu(row[1]) for row in self.gps]
+
+    def reset(self):
+        """Discard the previous session's throttle and snapshot sequence."""
+        self.next_stamp = 0
+        self.sequence = 0
 
     def enu(self, lla):
         dx, dy, dz = (v - o for v, o in zip(ecef(lla), self.origin_ecef))

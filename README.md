@@ -144,6 +144,12 @@ Install host sender requirements:
 python3 -m pip install -r tools/host_replay/requirements.txt
 ```
 
+The optional playback window needs Ubuntu's `python3-tk` package in the host
+runtime. In a root terminal inside `zed-dev`, install it with
+`apt-get install -y python3-tk`. The GUI also needs access to the desktop display
+(`DISPLAY` and the X11 socket mount in the desktop container). Terminal and
+unattended playback do not require Tk.
+
 For segmentation, first install the platform-compatible CUDA PyTorch build,
 then install `src/lr-ros2/lr-segmentation/requirements.txt` without replacing
 that build. Keep the SVO and DB paths explicit when running the sender.
@@ -254,12 +260,13 @@ radians. The bundled rover config contains reference values for evaluation.
 ### 2. Host: start the independent simulator
 
 Use a Python environment with ZED SDK/pyzed and pymavlink; ROS setup is not
-required. Replace the SVO path with the matching local recording:
+required. Run from the workspace root (`/zed/lr-ros2` inside `zed-dev`). The
+example uses the July 10 recording in the sibling `svo/` directory and its
+matching MAVLink DB. When selecting another recording, change both paths:
 
 ```bash
-cd ~/Projects/zed/lr-ros2
-python3 tools/host_replay/replay.py --time-mode live --future-path \
-  --svo-path /absolute/path/to/recording.svo2 \
+python3 tools/host_replay/replay.py --time-mode live --future-path --gui \
+  --svo-path "$PWD/../svo/zed_20260710_092420_0001.svo2" \
   --mavlink-db-path "$PWD/mavlink/session_20260710_0924_mavlink/session_mavlink.db" \
   --stream-port 30000 \
   --mavlink-bind-address 10.42.0.1 --mavlink-bind-port 14550 \
@@ -269,9 +276,49 @@ python3 tools/host_replay/replay.py --time-mode live --future-path \
 
 The entire `tools/host_replay/` directory can be copied elsewhere and run as
 `python3 replay.py` with the same arguments. Playback is sequential 1x with
-H.264, 20000 Kbit/s and GOP 1. `--play-from-frame` defaults to 0. EOF, Ctrl+C or
-SIGTERM closes the source and sockets; there is no loop, pause or seek.
+H.264, 20000 Kbit/s and GOP 1. `--play-from-frame` defaults to 0. Without
+graphical or terminal controls, EOF, Ctrl+C or SIGTERM closes the source and
+sockets; playback does not loop.
 Live mode rejects clock endpoints. Stop/start the sender to begin a new session.
+
+The command above opens the **Host SVO Playback** window with `--gui`. Drag the
+timeline and release to seek once, use the **Pause/Play**, **−10 s**, **+10 s** or
+**Replay** buttons, or enter a frame number and click **Go**. The window shows
+the current time, duration, frame and playback state. Space toggles playback
+when the frame entry is not focused. Seeking while paused selects a position;
+press **Play** to transmit from it. SDK work runs on a single worker so the
+window remains responsive while opening or reconnecting. Video and perception
+results are displayed by RViz.
+
+For terminal playback controls, replace `--gui` with `--interactive`. Type a
+command and press Enter in the sender terminal:
+
+| Command | Action |
+|---|---|
+| `seek 9000` | Jump to the absolute, zero-based SVO frame |
+| `skip 10`, `skip -10` | Jump forward/backward by seconds at the recording's FPS |
+| `pause` | Stop the source; retain the next frame for resume |
+| `resume` | Resume from the selected frame |
+| `replay` | Start again from frame 0 |
+| `status`, `help`, `quit` | Show position, show commands, or exit |
+
+Each seek while playing, resume or replay closes and reopens the NET source
+and MAVLink socket, creates a new live session, resets the causal telemetry
+cursor and discards pending future-path fragments. The Jetson supervisor
+restarts its NET receiver when the source session changes, clearing buffered
+images before resuming processing. Keep the backend running; reconnecting is
+not instantaneous. The ENU origin and loaded perception models are retained.
+
+Pause releases the source and sockets rather than repeatedly streaming a
+frozen frame. Jetson outputs expire under the normal freshness rules. Seeking
+while paused selects a frame without transmitting it; `resume` starts a new
+session there. At EOF, the GUI stays open for another seek or replay; terminal
+mode waits for `seek`/`resume`, `replay` or `quit`. Closing the window, Ctrl+C or
+SIGTERM exits and releases resources; closed standard input also exits terminal
+mode. `--gui` and `--interactive` are mutually exclusive and require
+`--time-mode live` and `headless_live.launch.py`. Recorded-time replay baselines
+keep sequential playback and their existing clock behavior. The controls require no ROS imports
+and remain usable after copying `tools/host_replay/` outside the workspace.
 
 Path options are `--future-path-radius-m` (15 m), `--future-path-step-m` (0.2 m)
 and `--future-path-rate-hz` (at most 5 Hz, sampled on frames). Snapshots contain
@@ -320,7 +367,7 @@ Host, in a ROS terminal:
 
 ```bash
 ros2 launch lr_mavlink_replay host_replay.launch.py \
-  svo_path:=/absolute/path/to/recording.svo2 stream_port:=30000 \
+  svo_path:="$PWD/../svo/zed_20260710_092420_0001.svo2" stream_port:=30000 \
   mavlink_bind_address:=10.42.0.1 mavlink_bind_port:=14550 \
   mavlink_destination:=10.42.0.242 mavlink_destination_port:=14540 \
   mavlink_db_path:="$PWD/mavlink/session_20260710_0924_mavlink/session_mavlink.db" \
@@ -357,7 +404,7 @@ Replace the ROS source with:
 
 ```bash
 python3 tools/host_replay/replay.py --time-mode replay \
-  --svo-path /absolute/path/to/recording.svo2 \
+  --svo-path "$PWD/../svo/zed_20260710_092420_0001.svo2" \
   --mavlink-db-path "$PWD/mavlink/session_20260710_0924_mavlink/session_mavlink.db" \
   --stream-port 30000 \
   --mavlink-bind-address 10.42.0.1 --mavlink-bind-port 14550 \

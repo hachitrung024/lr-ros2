@@ -14,7 +14,9 @@ from lr_mavros_bridge.live_runtime import LiveRuntime
 
 
 def test_empty_startup_descriptor_does_not_retire_active_session():
-    runtime = SimpleNamespace(session=None, retired=set(), was_synced=False,
+    stops = []
+    runtime = SimpleNamespace(session=None, retired=set(), was_synced=False, child=None,
+                              stop_camera=lambda: stops.append(1),
                               get_clock=lambda: SimpleNamespace(now=lambda: SimpleNamespace(
                                   nanoseconds=100_000_000_000)))
     boundaries = []
@@ -29,10 +31,14 @@ def test_empty_startup_descriptor_does_not_retire_active_session():
     receive('first')
     assert runtime.session == 'first'
     assert not runtime.retired
+    runtime.child = object()
     receive('second')
     assert runtime.retired == {'first'}
+    assert stops == [1] and not runtime.received_raw and runtime.last_frame == 0.
+    receive('second')
     receive('first')
     assert runtime.session == 'second'
+    assert stops == [1]
     assert boundaries.count('new_session') == 2
 
 
