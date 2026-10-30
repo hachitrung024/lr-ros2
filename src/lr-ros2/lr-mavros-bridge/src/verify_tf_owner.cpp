@@ -7,6 +7,8 @@
 int main(int argc, char **argv) {
   rclcpp::init(argc, argv);
   auto node = std::make_shared<rclcpp::Node>("verify_camera_tf_owner");
+  const auto map_frame = node->declare_parameter("map_frame", "map");
+  const auto camera_frame = node->declare_parameter("camera_frame", "zed_camera_link");
   std::set<std::string> owners;
   size_t frames = 0;
   auto sub = node->create_subscription<tf2_msgs::msg::TFMessage>(
@@ -14,8 +16,8 @@ int main(int argc, char **argv) {
       [&](tf2_msgs::msg::TFMessage::ConstSharedPtr msg,
           const rclcpp::MessageInfo &info) {
         for (auto &t : msg->transforms) {
-          if (t.header.frame_id == "map" &&
-              t.child_frame_id == "zed_camera_link") {
+          if (t.header.frame_id == map_frame &&
+              t.child_frame_id == camera_frame) {
             std::ostringstream s;
             for (auto b : info.get_rmw_message_info().publisher_gid.data)
               s << std::hex << std::setw(2) << std::setfill('0') << int(b);

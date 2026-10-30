@@ -10,7 +10,7 @@ from std_msgs.msg import String
 
 
 class SourceGuard:
-    def __init__(self, node, reset, resume=None):
+    def __init__(self, node, reset, resume=None, *, topic='/lr/source/generation'):
         self.node, self.reset = node, reset
         self.resume = resume
         self.lock = threading.Lock()
@@ -19,8 +19,10 @@ class SourceGuard:
         self.session_id = ''
         self.retired = set()
         self.pending_resume = False
+        self.camera = topic == '/lr/source/camera_generation'
+        self.stamp_is_system, self.latest_stamp_ns = True, 0
         self.subscription = node.create_subscription(
-            String, '/lr/source/generation', self.on_state,
+            String, topic, self.on_state,
             QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL),
             callback_group=MutuallyExclusiveCallbackGroup())
         if resume is not None:
@@ -46,6 +48,8 @@ class SourceGuard:
                 self.generation = incoming
                 self.session_id = data.get('session_id', '')
                 self.ready, self.start_ns = data['ready'], int(data['start_ns'])
+                self.stamp_is_system = bool(data.get('stamp_is_system', True))
+                self.latest_stamp_ns = int(data.get('latest_stamp_ns', 0))
                 self.seen = time.monotonic()
             if changed:
                 self.reset(None)
@@ -69,9 +73,11 @@ class SourceGuard:
     def valid(self, stamp, token):
         ns = stamp.sec * 1_000_000_000 + stamp.nanosec
         with self.lock:
+            reference = (self.latest_stamp_ns if self.camera and not self.stamp_is_system
+                         else self.node.get_clock().now().nanoseconds)
             return (self.ready and token == self.generation and ns >= self.start_ns
                     and time.monotonic() - self.seen < 2.0
-                    and -500_000_000 <= self.node.get_clock().now().nanoseconds - ns <= 2_000_000_000)
+                    and ns > 0 and -500_000_000 <= reference - ns <= 2_000_000_000)
 
 
 def attach_guard(node, reset):

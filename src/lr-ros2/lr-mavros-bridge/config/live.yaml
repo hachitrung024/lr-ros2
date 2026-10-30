@@ -1,7 +1,7 @@
 /**:
   ros__parameters:
     use_sim_time: false
-    plugin_allowlist: [command, sys_status, sys_time, global_position, imu, lr_source_time, lr_future_path]
+    plugin_allowlist: [command, sys_status, sys_time, global_position, imu, lr_source_time, waypoint, home_position]
     target_system_id: 1
     target_component_id: 1
 /**/sys:

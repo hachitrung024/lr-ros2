@@ -113,9 +113,10 @@ def test_udp_system_time_and_causal_sensor_stamps(tmp_path):
         receiver.close()
 
 
-@pytest.mark.parametrize('mode', ['replay', 'live', 'live-path', 'interactive', 'gui'])
+@pytest.mark.parametrize('mode', ['replay', 'live', 'live-path', 'interactive', 'gui',
+                                  'native', 'native-interactive', 'native-gui'])
 def test_copied_tool_replays_without_workspace_or_ros(tmp_path, mode):
-    if mode == 'gui' and (not os.environ.get('DISPLAY') or
+    if mode in ('gui', 'native-gui') and (not os.environ.get('DISPLAY') or
                           importlib.util.find_spec('tkinter') is None):
         pytest.skip('GUI needs Tk and a display')
     copied = tmp_path / 'standalone'
@@ -156,12 +157,13 @@ raise SystemExit(main(sys.argv[1:]))
             '--mavlink-bind-address', '127.0.0.1', '--mavlink-bind-port', str(bind_port),
             '--mavlink-destination', '127.0.0.1',
             '--mavlink-destination-port', str(mav_sink.getsockname()[1]), '--time-mode',
+            'native' if mode.startswith('native') else
             'live' if mode in ('live-path', 'interactive', 'gui') else mode]
     if mode in ('live-path', 'interactive', 'gui'):
         args += ['--future-path']
-    if mode == 'interactive':
+    if mode in ('interactive', 'native-interactive'):
         args += ['--interactive']
-    if mode == 'gui':
+    if mode in ('gui', 'native-gui'):
         args += ['--gui']
     if mode == 'replay':
         args += ['--clock-destination', '127.0.0.1',
@@ -169,11 +171,13 @@ raise SystemExit(main(sys.argv[1:]))
     try:
         result = subprocess.run(args, cwd=tmp_path, capture_output=True, text=True, timeout=10,
                                 input=('status\nseek 3\npause\nseek 0\nresume\nquit\n'
-                                       if mode == 'interactive' else None),
+                                       if mode in ('interactive', 'native-interactive') else None),
                                 env={k: v for k, v in os.environ.items() if k != 'PYTHONPATH'})
         assert result.returncode == 0, result.stdout + result.stderr
-        if mode != 'gui':
+        if mode not in ('gui', 'native-gui', 'native', 'native-interactive'):
             assert ('paused:' if mode == 'interactive' else 'EOF: 4 frames') in result.stdout
+        if mode.startswith('native'):
+            assert 'protocol=native' in result.stdout
         assert 'Control failed:' not in result.stderr
     finally:
         mav_sink.close()

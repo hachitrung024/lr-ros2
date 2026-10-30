@@ -36,7 +36,15 @@ def arguments(argv=None):
     parser.add_argument('--mavlink-bind-port', required=True, type=port)
     parser.add_argument('--mavlink-destination', required=True)
     parser.add_argument('--mavlink-destination-port', required=True, type=port)
-    parser.add_argument('--time-mode', choices=('replay', 'live'), default='replay')
+    parser.add_argument('--time-mode', choices=('replay', 'live', 'native'), default='replay')
+    mission = parser.add_mutually_exclusive_group()
+    mission.add_argument('--mission-path', help='Version 1 JSON mission fixture with waypoints')
+    mission.add_argument('--mission-from-recording', action='store_true',
+                         help='Explicitly approximate a test mission from recorded GPS')
+    parser.add_argument('--system-id', type=int, default=1)
+    parser.add_argument('--component-id', type=int, default=1)
+    parser.add_argument('--control-file', help='Host-only JSON for independent source fault tests')
+    parser.add_argument('--native-status-file', help='Host-only native transport evaluation JSON')
     parser.add_argument('--clock-destination')
     parser.add_argument('--clock-destination-port', type=port)
     parser.add_argument('--play-from-frame', type=int, default=0)
@@ -55,8 +63,14 @@ def arguments(argv=None):
         parser.error('--stream-port must be even and in [2, 65534]')
     if args.play_from_frame < 0:
         parser.error('--play-from-frame must be non-negative')
-    if (args.interactive or args.gui) and args.time_mode != 'live':
-        parser.error('--interactive/--gui require --time-mode live')
+    if (args.interactive or args.gui) and args.time_mode not in ('live', 'native'):
+        parser.error('--interactive/--gui require --time-mode live or native')
+    if not all(1 <= n <= 255 for n in (args.system_id, args.component_id)):
+        parser.error('MAVLink source IDs must be in [1, 255]')
+    if args.time_mode != 'native' and any((args.mission_path, args.mission_from_recording,
+                                         args.control_file, args.native_status_file,
+                                         args.system_id != 1, args.component_id != 1)):
+        parser.error('mission/control/status options require --time-mode native')
     if args.future_path and args.time_mode != 'live':
         parser.error('--future-path requires --time-mode live')
     if not all(math.isfinite(v) and v > 0 for v in (
@@ -66,9 +80,9 @@ def arguments(argv=None):
     if args.time_mode == 'replay' and (
             not args.clock_destination or args.clock_destination_port is None):
         parser.error('replay requires --clock-destination and --clock-destination-port')
-    if args.time_mode == 'live' and (
+    if args.time_mode in ('live', 'native') and (
             args.clock_destination is not None or args.clock_destination_port is not None):
-        parser.error('live does not accept clock endpoints')
+        parser.error('live/native does not accept clock endpoints')
     for name in ('mavlink_bind_address', 'mavlink_destination'):
         if not getattr(args, name).strip():
             parser.error(name.replace('_', '-') + ' must be nonempty')
@@ -91,7 +105,15 @@ def run(source, telemetry, clock=None, *, monotonic=time.monotonic, sleep=time.s
                     if clock is None else deadline + source.period)
         now = monotonic()
         if deadline <= now:
-            deadline = now + source.period
+            if getattr(telemetry, 'independent', False):
+                # Keep the camera on the FCU's independently advancing clock.
+                # Drop overdue frames under load instead of drifting or bursting.
+                skip = int((now-deadline)/source.period)
+                if skip > 0:
+                    target = min(source.total_frames-1, source.frame_id+1+skip)
+                    source._check(source.camera.set_svo_position(target), 'skip overdue frame')
+            else:
+                deadline = now + source.period
         while monotonic() < deadline:
             if poll is not None and poll():
                 return frames
@@ -117,6 +139,10 @@ def run_controlled(player, commands):
 
 def main(argv=None):
     """Run sequential playback or the live terminal controller."""
+    if (sys.argv[1:] if argv is None else argv) == ['--native-worker']:
+        from .native_worker import worker
+        worker()
+        return 0
     args = arguments(argv)
 
     def interrupted(_signum, _frame):
@@ -132,10 +158,23 @@ def main(argv=None):
                 return run_gui(args, recording, coverage, run_controlled)
             if args.interactive:
                 commands = TerminalCommands()
-                player = LivePlayback(args, recording, coverage)
+                if args.time_mode == 'native':
+                    from .native_playback import NativePlayback
+                    player = NativePlayback(args, recording, coverage)
+                else:
+                    player = LivePlayback(args, recording, coverage)
                 resources.callback(player.close)
                 print(HELP, flush=True)
                 run_controlled(player, commands)
+                return 0
+            if args.time_mode == 'native':
+                from .native_playback import NativePlayback
+                player = NativePlayback(args, recording, coverage)
+                resources.callback(player.close)
+                player.start(args.play_from_frame)
+                if player.source is not None:
+                    commands = type('NoCommands', (), {'poll': lambda self: None})()
+                    run(player.source, player.telemetry, poll=lambda: player.poll(commands))
                 return 0
             source = SvoSource(args.svo_path, args.stream_port, args.play_from_frame)
             resources.callback(source.close)

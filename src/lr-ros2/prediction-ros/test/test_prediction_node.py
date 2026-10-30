@@ -100,6 +100,25 @@ def test_diagnostics_identify_the_waiting_cycle(node):
     assert values['trajectory_id'] == '42'
 
 
+def test_diagnostics_allow_processing_latency_within_live_path_freshness(node):
+    from diagnostic_msgs.msg import DiagnosticStatus
+    from rclpy.time import Time as ClockTime
+    node._node.get_clock().set_ros_time_override(ClockTime(seconds=10.7))
+    trajectory, geometry = inputs()
+    node._objects_callback(TrackedObjectArray(header=header(10)))
+    node._state_callback(RoverState(header=header(10), acceleration_valid=True))
+    node._geometry_callback(geometry)
+    node._trajectory_callback(trajectory)
+    assert node.outputs
+    messages = []
+    node._diagnostics = SimpleNamespace(publish=messages.append)
+    node._publish_diagnostics()
+    assert messages[-1].status[0].level == DiagnosticStatus.OK
+    node._node.get_clock().set_ros_time_override(ClockTime(seconds=11.2))
+    node._publish_diagnostics()
+    assert messages[-1].status[0].level == DiagnosticStatus.WARN
+
+
 def test_source_changes_during_physics_do_not_publish_old_result(node):
     import json
     from nav_msgs.msg import Path as RosPath

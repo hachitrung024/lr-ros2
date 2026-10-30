@@ -1,0 +1,3 @@
+#!/usr/bin/env python3
+from lr_mavros_bridge.mission_path_node import main
+main()

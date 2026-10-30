@@ -1,16 +1,18 @@
 # Landfill Rover ROS 2
 
-A distributed perception pipeline: the host provides ZED NET video and MAVLink
-telemetry, Jetson runs the headless backend, and the host displays results in
-RViz. The standalone SVO simulator runs without ROS.
+A distributed perception pipeline: independent sources provide ZED NET video
+and MAVLink telemetry, Jetson runs the headless backend, and the host displays
+results in RViz. The host's standalone SVO simulator runs without ROS.
 
 ## System architecture
 
 ```mermaid
 flowchart LR
-    subgraph Host
+    subgraph Sources[External sources or host simulator]
         S[SVO recording or stereo camera]
         D[Recorded telemetry or FCU]
+    end
+    subgraph Host
         R[RViz]
     end
     subgraph Jetson
@@ -19,14 +21,15 @@ flowchart LR
         P[Causal pose and map TF]
         T[Terrain geometry]
         G[Segmentation and 3D tracking]
-        F[Future-path assembly and ENU conversion]
+        F[Mission or replay path and ENU conversion]
         B[Prediction bridge and physics]
     end
     S -->|ZED NET| Z
-    D -->|MAVLink UDP: telemetry, time calibration, optional path| M
+    D <-->|MAVLink: telemetry, TIMESYNC, mission or replay path| M
     M --> P
     M --> F
-    P --> Z
+    Z -->|Frame timestamp| P
+    P -->|Map TF| T
     Z --> T
     Z --> G
     P --> G
@@ -40,13 +43,15 @@ flowchart LR
     B -->|ROS 2 DDS| R
 ```
 
-The normal deployment keeps Jetson running while the host source starts,
-stops or replays a recording. Jetson receives NET input only; it does not open
-an SVO or a local camera.
+The normal deployment keeps Jetson running while either source starts or
+stops. The replay profile also supports seeking on the host. Jetson receives
+NET input only; it does not open an SVO or a local camera.
 
 | Mode | Host source | Jetson launch | Time ownership | DB on Jetson |
 |---|---|---|---|---|
-| Always-on live simulation | Python, `--time-mode live` | `headless_live.launch.py` | System time; no `/clock` | No |
+| Native deployment | External ZED NET and FCU | `headless_live.launch.py`, `source_profile:=native` | Verified system time; no `/clock` | No |
+| Native source simulation | Python, `--time-mode native` | Same native launch and clock contract as real sources | System time; no `/clock` | No |
+| Legacy live simulation | Python, `--time-mode live` | `headless_live.launch.py`, `source_profile:=host_replay` | System time; no `/clock` | No |
 | ROS replay baseline | `host_replay.launch.py` | `headless_zed_cam.launch.py` | Host ZED source publishes `/clock` | Yes, reference path/origin only |
 | Python replay baseline | Python, `--time-mode replay` | `headless_zed_cam.launch.py`, UDP clock | Jetson clock bridge publishes `/clock` | Yes, reference path/origin only |
 
@@ -75,7 +80,13 @@ belong on Jetson. Build products and local data are outside source control.
 
 ### Time, pose and recovery
 
-- Always-on nodes use `use_sim_time=false`. The simulator maps recorded IMAGE
+`headless_live` defaults to `source_profile:=native`. ZED NET and MAVLink
+start and reconnect independently. Camera RGB/depth/cloud and 2D segmentation
+continue without telemetry; pose, map products and prediction require verified
+camera time, fresh synchronized telemetry and the appropriate data inputs.
+`source_profile:=host_replay` selects the existing LRST/LRFP simulator contract.
+
+- Always-on nodes use `use_sim_time=false`. In `host_replay`, the simulator maps recorded IMAGE
   time to host monotonic boot time; MAVROS TIMESYNC maps boot time to ROS time.
   The relay preserves sensor payloads/frame IDs and gives matching RGB, depth,
   camera-info and cloud products the same converted timestamp.
@@ -86,16 +97,73 @@ belong on Jetson. Build products and local data are outside source control.
 - The pose adapter alone owns `map -> zed_camera_link`. Wrapper tracking and
   map TF are disabled in the always-on path. With another `camera_name`, the
   child frame is `<camera_name>_camera_link`.
-- MAVROS TIMESYNC runs at 10 Hz, converges over 30 samples and rejects RTT
-  samples above 20 ms. Missing/stale telemetry suppresses operational outputs.
+- MAVROS TIMESYNC runs at 10 Hz with a 30-sample convergence window. The
+  readiness monitor additionally requires 30 observations agreeing with the
+  applied estimate, RTT below 20 ms, and an accepted observation within 2 s.
+  Zero and negative offsets are valid. Reboots, clock jumps and expired sync
+  invalidate fusion. Missing/stale telemetry suppresses map products, not 2D.
+- Native camera time is explicit: `camera_time_mode:=unverified` (default)
+  preserves source stamps for camera-only processing; `system` asserts that
+  acquisition timestamps already use synchronized Unix time; `offset` adds
+  the measured signed `camera_time_offset_ns`. The latter two require prior
+  verification of the sender clock and its drift against Jetson. Packet arrival
+  time or an epoch-looking timestamp is not evidence of synchronization.
+  FCU TIMESYNC alone does not verify the camera clock.
+- `camera_time_mode:=fcu_utc` explicitly asserts that camera IMAGE timestamps
+  use the same UTC clock as the FCU's standard `SYSTEM_TIME.time_unix_usec`.
+  Five consistent SYSTEM_TIME anchors relate UTC to boot time; converged
+  TIMESYNC relates boot time to Jetson system time. The relay adds
+  `timesync_offset - (fcu_utc - fcu_boot)` to each raw frame stamp. Anchors must
+  be from the configured component, fresh within 2 s, and consistent with the
+  TIMESYNC boot clock. This uses reported clock pairs and measured RTT, never
+  network arrival as evidence of camera synchronization. Missing, stale or
+  inconsistent anchors block fusion and retain camera/2D with the last mapping.
+  A changed UTC relation flushes the NET receiver and both generations.
+  The native simulator defines this shared virtual UTC from SVO IMAGE time;
+  real sources must independently verify that their camera shares FCU UTC.
+  Jetson requests SYSTEM_TIME at 1 Hz through standard
+  `MAV_CMD_REQUEST_MESSAGE` so an FCU need not broadcast it by default. A rejected
+  or missing reply is diagnosed and fusion remains blocked; no clock is guessed.
 - Inputs expire after 2 s. The camera supervisor allows 15 s for SDK startup,
   requires a real raw frame before readiness, and restarts an established NET
   receiver after 5 s without frames, with a 2 s retry interval.
-- Session/generation changes clear queues, timestamp/TF caches, terrain,
-  trackers and prediction state. In-flight old results and pre-boundary queued
-  data are rejected. Models and the ENU origin remain loaded.
+- Camera and fusion have separate generations. MAVLink loss resets fusion
+  queues, TF caches, terrain, trackers and prediction while keeping camera and
+  segmentation loaded. NET restarts or camera clock jumps reset both domains.
+  Replay session changes restart only the NET receiver to flush old frames.
+  In-flight old results and pre-boundary data are rejected; the ENU origin is retained.
 
 ### Future path and prediction
+
+Native prediction uses `/lr/future_path/mission` (`nav_msgs/Path`). The Jetson
+reads the FCU mission through MAVROS `/mavros/mission/pull` and
+`/mavros/mission/waypoints`; MAVLink is bidirectional for time synchronization
+and read requests. The backend never uploads, clears or starts a mission.
+Successful complete downloads refresh every 10 s and expire after 30 s.
+`MISSION_CURRENT` must be received from the configured target within 3 s.
+Reconnect or FCU clock reset discards the cached mission and HOME.
+Reported inactive/completed or suspended mission states stop prediction; a
+changed mission ID forces a fresh download. FCUs omitting these MAVLink 2
+extensions use the fresh sequence number and downloaded mission instead.
+See the standard [MISSION_CURRENT fields](https://mavlink.io/en/messages/common.html#MISSION_CURRENT).
+
+V1 accepts remaining `MAV_CMD_NAV_WAYPOINT` items in GLOBAL/GLOBAL_INT (MSL)
+or GLOBAL_RELATIVE_ALT/GLOBAL_RELATIVE_ALT_INT frames. Relative altitude needs
+HOME_POSITION; MAVROS ellipsoid HOME altitude is converted to MSL using
+GeographicLib. Other commands/frames, missing HOME, invalid coordinates and
+empty/completed missions block prediction with a diagnostic. The local route
+runs from current pose through the active and subsequent waypoints using the
+same ENU origin/extrinsics as pose, tangent yaw, 15 m radius and 0.2 m spacing.
+It publishes up to 4 Hz with at most 128 path points; pose stamps identify the
+current evaluation, not future arrival times. This is a waypoint polyline,
+not a reconstruction of the FCU's steering controller. Missing route data clears
+prediction and markers while valid pose/map processing continues.
+Path/trajectory stamps retain the pose observation used for evaluation. Native
+consumers require a route update within 1 s and a source stamp within the same
+2 s bound as fusion, allowing camera/terrain processing latency without
+repeated cache resets. The private replay baseline retains its 1 s source bound.
+
+For `host_replay`, the following recorded-path baseline remains available.
 
 The host's `--future-path` option reads recorded look-ahead separately from the
 causal telemetry cursor. It sends path snapshots over the existing MAVLink
@@ -111,8 +179,7 @@ The canonical bridge samples up to 20 future steps. The `static` profile uses
 path, terrain and objects; `dynamic` additionally uses pose-derived velocity
 and acceleration. Prediction publishes collision/rollover evidence, not rover
 control commands. Recorded future GPS is an evaluation reference, not a planner.
-A physical FCU does not automatically provide this private path format; a
-planner or a separate standard-MAVLink mission adapter must provide its route.
+The native profile uses the mission adapter above and does not require either private TUNNEL type.
 
 ## Environment and build
 
@@ -233,21 +300,177 @@ Unix timestamps must agree.
 
 ## Run the always-on pipeline
 
-### 1. Jetson: start the backend once
+### Native deployment: Jetson receives the external sources
+
+Provide measured rover physics (the schema is in
+`prediction-core/config/rover.reference.yaml`), measured XYZ/RPY camera mounting,
+a segmentation model and explicit network endpoints. Native prediction rejects
+an omitted rover file or the bundled reference filename. File contents must
+come from the real rover; software cannot certify the measurements.
+
+Set `ROVER_CONFIG`, `BODY_TO_CAMERA` (a six-number list, metres/radians),
+`ZED_STREAM_ADDRESS` and `MAVROS_FCU_URL` to the actual deployment values:
+
+```bash
+ros2 launch lr_display_rviz2 headless_live.launch.py \
+  source_profile:=native camera_model:=zed2i \
+  stream_address:="${ZED_STREAM_ADDRESS:?Set the NET source address}" stream_port:=30000 \
+  mavros_fcu_url:="${MAVROS_FCU_URL:?Set the explicit MAVROS connection URL}" \
+  target_system_id:=1 target_component_id:=1 \
+  segmentation_model_path:="$PWD/models/best.pt" \
+  mavlink_body_to_camera:="${BODY_TO_CAMERA:?Set measured XYZ/RPY extrinsics}" \
+  rover_config:="${ROVER_CONFIG:?Set the measured rover YAML path}" \
+  camera_time_mode:=unverified prediction_profile:=static
+```
+
+This starts camera/2D and reports why fusion is blocked. After independently
+verifying camera timestamps, set `camera_time_mode:=system`, or use `offset`
+and the measured `camera_time_offset_ns`. Do not enable fusion by estimating an
+offset from UDP/DDS arrival latency. Native deployment requires heartbeat,
+GPS/attitude topics supported by the MAVROS adapters, TIMESYNC responses and a
+supported mission; the protocol names alone do not guarantee these inputs.
+The current pose adapter uses `/mavros/global_position/raw/fix` and
+`/mavros/imu/data`; standard GPS_RAW_INT, ATTITUDE and HIGHRES_IMU are exercised
+in integration tests. Target IDs are explicit and configurable (1/1 defaults).
+
+`gps_max_age_s` (0.75), `gps_max_gap_s` (1.5), `attitude_max_age_s` (0.25) and
+`max_speed_mps` (5.0) are launch parameters. These limits are applied by the
+pose estimator against each image's acquisition time. The supervisor uses a
+separate 2 s stream watchdog so a brief per-frame telemetry gap does not reset
+the entire map. Native prediction defaults on;
+`prediction_enabled:=false` is available for camera/fusion diagnostics and does
+not qualify as a complete deployment. The pose adapter alone publishes camera
+map TF; always-on nodes use system time and never open a recording DB.
+
+### One native backend for simulation and real sources
+
+The native simulator is the deployment compatibility path. Start Jetson with
+the same model, measured rover physics, extrinsics, target IDs and endpoints
+that will be used with the real sources. For sources verified to share FCU UTC,
+use the native command above with `camera_time_mode:=fcu_utc`. Keep that Jetson
+launch running when starting, stopping or seeking the simulator. There is no
+simulator profile, DB path, private path plugin or `/clock` on Jetson in this
+mode. If the real sender does not meet the shared-UTC contract or does not
+provide SYSTEM_TIME, this configuration will block fusion; use a separately
+verified `system`/`offset` configuration instead and repeat compatibility tests.
+Protocol names alone cannot establish clock equivalence.
+
+After verifying that clock contract, the **same Jetson command** is used with
+either source (the required environment variables are defined above):
+
+```bash
+ros2 launch lr_display_rviz2 headless_live.launch.py \
+  source_profile:=native camera_time_mode:=fcu_utc camera_model:=zed2i \
+  stream_address:="${ZED_STREAM_ADDRESS:?Set the NET source address}" stream_port:=30000 \
+  mavros_fcu_url:="${MAVROS_FCU_URL:?Set the explicit MAVROS connection URL}" \
+  target_system_id:=1 target_component_id:=1 \
+  segmentation_model_path:="$PWD/models/best.pt" \
+  mavlink_body_to_camera:="${BODY_TO_CAMERA:?Set measured XYZ/RPY extrinsics}" \
+  rover_config:="${ROVER_CONFIG:?Set the measured rover YAML path}" \
+  prediction_enabled:=true prediction_profile:=static
+```
+
+Source addresses, IDs, camera model and measured calibration must match the
+actual installation. Within the same geographic map, both producers can use
+the configured endpoints without a Jetson restart, profile switch or parameter
+update. The ENU origin is fixed for the backend lifetime: start a fresh backend
+map when changing GPS sites, such as switching from a recording made in another
+country. The native launch command and processing implementation remain the same.
+
+| Input contract | Native simulator and required real-source behavior |
+|---|---|
+| Camera | ZED SDK NET stereo stream, IMAGE timestamps in the explicitly verified shared FCU UTC |
+| Clock | Boot-domain TIMESYNC replies; SYSTEM_TIME UTC/boot pair, broadcast or standard REQUEST_MESSAGE reply |
+| GPS | GPS_RAW_INT with valid fix, global coordinates and MSL altitude; tested sensor time is boot microseconds |
+| Attitude/acceleration | ATTITUDE boot milliseconds and HIGHRES_IMU boot microseconds with measured SI fields |
+| Mission | Retryable standard mission download and fresh MISSION_CURRENT from configured IDs; V1 waypoint/frame restrictions above |
+| HOME | HOME_POSITION MSL altitude when relative-altitude waypoints are used |
+
+FCUs using Unix time in 64-bit sensor timestamp fields require verification
+that MAVROS-produced sensor headers are already aligned to Jetson system time;
+MAVROS treats Unix timestamps differently from boot timestamps. This simulator
+does not establish compatibility for every permitted MAVLink dialect, time
+convention or vendor message set. Rejecting unavailable/unaligned inputs is
+part of the shared contract, not evidence of successful full deployment.
+
+On the host, from the workspace root, run:
+
+```bash
+python3 tools/host_replay/replay.py --time-mode native --mission-from-recording --gui \
+  --svo-path "$PWD/../svo/zed_20260710_092420_0001.svo2" \
+  --mavlink-db-path "$PWD/mavlink/session_20260710_0924_mavlink/session_mavlink.db" \
+  --stream-port 30000 \
+  --mavlink-bind-address 10.42.0.1 --mavlink-bind-port 14550 \
+  --mavlink-destination 10.42.0.242 --mavlink-destination-port 14540 \
+  --system-id 1 --component-id 1 --play-from-frame 4500
+```
+
+`--gui` can be replaced with `--interactive` or omitted. Native mode emits
+HEARTBEAT, SYSTEM_TIME, recorded GPS_RAW_INT/ATTITUDE/HIGHRES_IMU,
+MISSION_CURRENT, TIMESYNC replies, mission download replies and requested
+HOME_POSITION/AUTOPILOT_VERSION. It never sends private TUNNEL packets.
+The FCU runs in a separate process so camera SDK startup, disconnect or seek
+cannot stall heartbeat, TIMESYNC or mission requests. Telemetry advances on
+its own monotonic schedule at the recorded rates; overdue image frames may be
+dropped to retain the shared clock instead of accumulating timing drift.
+
+`--mission-from-recording` explicitly generates a geometric **test mission**
+from GPS stations at least 5 m apart, with progress based on recording time.
+It does not recover the actual FCU mission or steering controller. To use a
+specified mission, replace it with `--mission-path` pointing to JSON:
+
+```json
+{"version": 1, "home_msl": [34.2948, -118.3935, 509.0], "waypoints": [
+  {"frame": 0, "command": 16, "lat": 34.29485, "lon": -118.3935, "alt": 509.0},
+  {"frame": 3, "command": 16, "lat": 34.295, "lon": -118.3935, "alt": 0.0}
+]}
+```
+
+Frames 0/5 use MSL altitude; 3/6 use HOME-relative altitude. Optional
+`param1`..`param4` default to zero. File missions advance within 2 m of the
+recorded GPS position. An omitted mission is empty; `home_msl: null` models
+missing HOME. Downloads are read-only and retryable in float or integer form.
+The simulator rejects mission uploads, clearing and vehicle control commands.
+
+Native seek/resume keeps the FCU process/socket but models an FCU reboot and
+announces the new UTC/boot relation through standard messages. Jetson clears
+fusion and mission state and restarts only its NET receiver when required;
+models and the backend remain loaded. Pause stops NET and sensor playback but
+keeps FCU heartbeat/time services with mission mode suspended. The legacy
+`--time-mode live --future-path` contract remains a separate regression baseline.
+
+For fault tests, add host-only `--control-file /tmp/native-control.json` and
+`--native-status-file /tmp/native-status.json`. Atomically replace the control
+JSON with booleans `camera_enabled`, `telemetry_enabled`, `timesync_enabled`, `system_time_enabled`,
+`mission_enabled`, `progress_enabled`, `home_enabled`, `mission_empty`; omitted
+enable flags default to true. Increment integer `reboot` to reset the FCU boot
+clock while NET continues. The status JSON counts actual emitted message types
+and private packets. These files are never sent to Jetson.
+
+Evaluate native operation with `verify_live.py --mode deployment --source-profile
+native`; check the same backend runtime ID/configuration before and after
+MAVLink/NET loss, recovery, reboot and forward/backward seek. Check standard
+mission downloads, empty mission, missing HOME and stale progress separately.
+MAVLink loss must retain camera/2D and its generation; NET loss must retain the
+MAVROS process. Successful interface tests establish software compatibility,
+not physical timing accuracy, real mission fidelity or measured vehicle physics.
+The 30-minute real-source acceptance remains required before deployment approval.
+
+### Replay baseline: start the Jetson backend once
 
 In a Jetson ROS terminal:
 
 ```bash
 ros2 launch lr_display_rviz2 headless_live.launch.py \
-  camera_model:=zed2i stream_address:=10.42.0.1 stream_port:=30000 \
+  source_profile:=host_replay camera_model:=zed2i stream_address:=10.42.0.1 stream_port:=30000 \
   mavros_fcu_url:='udp://0.0.0.0:14540@10.42.0.1:14550' \
   segmentation_model_path:="$PWD/models/best.pt" \
   prediction_enabled:=true prediction_profile:=static
 ```
 
 The backend can start before the source and remain running between sessions.
-It accepts no recording DB or clock arguments. Prediction defaults off; the
-example enables it and therefore requires a segmentation model. To run without
+It accepts no recording DB or simulated-clock arguments. Prediction defaults on
+and therefore requires a segmentation model. To run without
 prediction, set `prediction_enabled:=false` here and in RViz and omit the
 host's `--future-path`. Omit `segmentation_model_path` to disable segmentation
 as well. No operating-system boot service is installed.
@@ -315,8 +538,8 @@ while paused selects a frame without transmitting it; `resume` starts a new
 session there. At EOF, the GUI stays open for another seek or replay; terminal
 mode waits for `seek`/`resume`, `replay` or `quit`. Closing the window, Ctrl+C or
 SIGTERM exits and releases resources; closed standard input also exits terminal
-mode. `--gui` and `--interactive` are mutually exclusive and require
-`--time-mode live` and `headless_live.launch.py`. Recorded-time replay baselines
+mode. `--gui` and `--interactive` are mutually exclusive and support
+`--time-mode live` or `native` with `headless_live.launch.py`. Recorded-time replay baselines
 keep sequential playback and their existing clock behavior. The controls require no ROS imports
 and remain usable after copying `tools/host_replay/` outside the workspace.
 
@@ -435,7 +658,8 @@ live-mode option only.
 | `/zed/zed_node/point_cloud/cloud_registered` | Registered point cloud |
 | `/lr/mavlink/pose` | Causal camera pose in `map` |
 | `/lr/mavlink/origin` | Fixed geodetic ENU origin, MSL altitude |
-| `/lr/future_path/mavlink` | Received path in always-on mode |
+| `/lr/future_path/mission` | Native FCU mission route |
+| `/lr/future_path/mavlink` | Received path in host_replay mode |
 | `/lr/future_path/ground_truth` | DB reference path in replay baselines |
 | `/segmentation/overlay`, `/segmentation/instance_mask` | Segmentation products |
 | `/segmentation/boxes_3d`, `/segmentation/tracked_footprints` | 3D objects and tracked footprints |
@@ -444,7 +668,8 @@ live-mode option only.
 | `/rover/state` | Dynamic-profile rover state |
 | `/predict_output` | Raw prediction evidence |
 | `/lr/path_prediction/reference_path`, `/lr/path_prediction/markers` | Matched path and warning visualization |
-| `/lr/source/generation`, `/lr/future_path/diagnostics` | Live source readiness and path diagnostics |
+| `/lr/source/generation`, `/lr/source/camera_generation` | Fusion and camera readiness/generations |
+| `/diagnostics`, `/lr/future_path/diagnostics` | Input, clock, fusion and route diagnostics |
 
 The bridge consumes `Detection3DArray` from `/segmentation/boxes_3d` by default.
 Objects are treated as static within a cycle when velocity is unavailable.
@@ -458,15 +683,35 @@ through the rover config; RViz thresholds do not change the physical model.
 
 ## Verification
 
-Observe the always-on pipeline with prediction:
+Observe a native deployment with prediction (`--duration 1800` for the
+30-minute hardware acceptance run):
 
 ```bash
 python3 src/lr-ros2/lr-mavros-bridge/tools/verify_live.py \
-  --with-prediction --duration 25 --timeout 60 --output /tmp/live-path.json
+  --mode deployment --source-profile native --duration 25 --timeout 60 --output /tmp/live-path.json
 ros2 run lr_mavros_bridge verify_tf_owner
 ros2 topic info /clock --verbose
 ros2 topic echo /lr/source/generation --once
 ```
+
+Use `--source-profile host_replay --with-prediction` for the replay baseline.
+Use `--mode camera --expect-degraded` to verify camera/2D continuity and absent
+map outputs while telemetry is disconnected or camera time is unverified;
+add `--with-prediction` when those processes are enabled. `--camera-name` and
+`--map-frame` support renamed deployments. The JSON report distinguishes
+camera readiness from fusion readiness and full native prediction operation.
+Use `--mode fusion --with-prediction --expect-no-prediction` to verify that
+pose/map continue while an empty, stale, unsupported or incomplete mission
+blocks prediction.
+
+`/diagnostics` reports camera, telemetry, clock and fusion readiness, input
+rates/ages, target IDs, RTT and clock offsets. Mission download/progress age,
+state and route rate are on `/lr/future_path/diagnostics`; prediction input age,
+output rate and missing-input reasons are on `/prediction/diagnostics`.
+
+Hardware acceptance additionally requires both real sources, measured vehicle
+calibration, clock verification and independent disconnect/reconnect trials.
+Synthetic input tests and recorded NET streaming do not certify those facts.
 
 Expect zero clock publishers in always-on mode and exactly one in either replay
 baseline. Without prediction, omit `--with-prediction`; without segmentation,

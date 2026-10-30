@@ -64,3 +64,18 @@ def test_retired_subscription_rejects_already_queued_executor_work():
     assert destroyed == [reader]
     assert not reader.callback_group.can_execute(reader)
     assert not reader.callback_group.beginning_execution(reader)
+
+
+def test_camera_guard_accepts_unknown_clock_but_fences_old_frames():
+    node = SimpleNamespace(create_subscription=lambda *_a, **_k: None,
+                           get_clock=lambda: SimpleNamespace(now=lambda: SimpleNamespace(
+                               nanoseconds=time.time_ns())))
+    guard = SourceGuard(node, lambda _: None, topic='/lr/source/camera_generation')
+    guard.on_state(String(data=json.dumps({'generation': 1, 'ready': True,
+        'start_ns': 1000000000, 'latest_stamp_ns': 4000000000, 'stamp_is_system': False})))
+    assert guard.valid(SimpleNamespace(sec=4, nanosec=0), guard.token())
+    assert not guard.valid(SimpleNamespace(sec=1, nanosec=0), guard.token())
+    old_token = guard.token()
+    guard.on_state(String(data=json.dumps({'generation': 2, 'ready': True,
+        'start_ns': 1000000000, 'latest_stamp_ns': 4000000000, 'stamp_is_system': False})))
+    assert not guard.valid(SimpleNamespace(sec=4, nanosec=0), old_token)

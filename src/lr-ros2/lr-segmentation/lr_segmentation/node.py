@@ -95,7 +95,9 @@ class SegmentationNode(Node):
         self._received_images = self._guard_rejections = 0
         if self.declare_parameter('source_guard_enabled', False).value:
             from lr_mavros_bridge.source_guard import SourceGuard
-            self._source_guard = SourceGuard(self, self._on_time_jump, self._on_source_resume)
+            topic = self.declare_parameter('source_guard_topic', '/lr/source/generation').value
+            self._source_guard = SourceGuard(
+                self, self._on_time_jump, self._on_source_resume, topic=topic)
         self.get_logger().info(f"RGB={image_topic}; overlay=~/overlay; mask=~/instance_mask")
 
     def _on_image(self, message: Image) -> None:

@@ -14,7 +14,7 @@
   <depend>angles</depend><build_depend>eigen3_cmake_module</build_depend><depend>eigen</depend><depend>geographiclib</depend>
   <exec_depend>rclpy</exec_depend><exec_depend>zed_wrapper</exec_depend>
   <exec_depend>geographic_msgs</exec_depend><exec_depend>geometry_msgs</exec_depend>
-  <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>nav_msgs</exec_depend><exec_depend>std_srvs</exec_depend>
   <exec_depend>diagnostic_msgs</exec_depend><exec_depend>rosgraph_msgs</exec_depend>
   <exec_depend>lr_future_path</exec_depend>
   <exec_depend>launch_ros</exec_depend><exec_depend>ament_index_python</exec_depend>

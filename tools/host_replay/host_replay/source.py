@@ -52,6 +52,7 @@ class SvoSource:
             streaming.bitrate = 20000
             streaming.gop_size = 1
             streaming.adaptative_bitrate = False
+            self.streaming = streaming
             self._check(self.camera.enable_streaming(streaming), 'enable NET streaming')
             self.runtime = sdk.RuntimeParameters()
             self.runtime.enable_depth = False

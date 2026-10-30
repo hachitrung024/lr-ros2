@@ -169,7 +169,11 @@ class PlaybackWindow:
     def _work(self):
         player = None
         try:
-            player = LivePlayback(self.args, self.recording, self.coverage,
+            player_class = LivePlayback
+            if self.args.time_mode == 'native':
+                from .native_playback import NativePlayback
+                player_class = NativePlayback
+            player = player_class(self.args, self.recording, self.coverage,
                                   on_update=self.channel.publish)
             self.channel.player = player
             try:

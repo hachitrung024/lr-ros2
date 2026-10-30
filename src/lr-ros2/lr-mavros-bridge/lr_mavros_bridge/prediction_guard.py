@@ -6,6 +6,7 @@ callback group on the next callback/timer, avoiding concurrent cache mutation.
 """
 
 from functools import wraps
+import math
 import threading
 import time
 
@@ -23,6 +24,10 @@ class PredictionGuard:
         self.path_stamp, self.path_seen, self.floor = None, 0., 0
         self.minimum_ns = 0
         self.was_ready = False
+        self.max_source_age_sec = float(node.declare_parameter(
+            'live_path_max_source_age_sec', 1.).value)
+        if not math.isfinite(self.max_source_age_sec) or not 0 < self.max_source_age_sec <= 2.:
+            raise ValueError('live_path_max_source_age_sec must be in (0, 2]')
         self.source = SourceGuard(node, self.invalidate)
         topic = node.declare_parameter('live_path_topic', '/lr/future_path/mavlink').value
         self.subscription = node.create_subscription(
@@ -63,7 +68,7 @@ class PredictionGuard:
             return False
         return (time.monotonic() - seen < 1. and self.source.valid(stamp, self.source.token())
                 and self.node.get_clock().now().nanoseconds - (
-                    stamp.sec * 1_000_000_000 + stamp.nanosec) <= 1_000_000_000)
+                    stamp.sec * 1_000_000_000 + stamp.nanosec) <= self.max_source_age_sec * 1e9)
 
     def poll(self):
         ready = self.available()

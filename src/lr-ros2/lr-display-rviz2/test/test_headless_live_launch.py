@@ -35,7 +35,8 @@ def context(**overrides):
     ctx = LaunchContext()
     ctx.launch_configurations.update(
         camera_model='zed2i', stream_address='192.0.2.1', stream_port='32000',
-        mavros_fcu_url='udp://:24540@192.0.2.1:24550')
+        mavros_fcu_url='udp://:24540@192.0.2.1:24550',
+        source_profile='host_replay', prediction_enabled='false')
     ctx.launch_configurations.update(overrides)
     for action in load().generate_launch_description().entities:
         if isinstance(action, DeclareLaunchArgument):
@@ -78,3 +79,30 @@ def test_prediction_requires_segmentation_and_uses_only_mavlink_path(tmp_path):
 def test_replay_arguments_or_invalid_endpoints_are_rejected(override):
     with pytest.raises(ValueError):
         load().launch_setup(context(**override))
+
+
+def test_native_requires_measured_config_and_uses_mission(tmp_path):
+    with pytest.raises(ValueError, match='extrinsics'):
+        load().launch_setup(context(source_profile='native'))
+    model, rover = tmp_path / 'model.pt', tmp_path / 'rover.yaml'
+    model.touch()
+    rover.write_text('rover: {}')
+    options = dict(source_profile='native', mavlink_body_to_camera='[0,0,0,0,0,0]',
+                   prediction_enabled='true', segmentation_model_path=str(model))
+    with pytest.raises(ValueError, match='measured rover_config'):
+        load().launch_setup(context(**options))
+    ctx = context(**options, rover_config=str(rover), target_system_id='7',
+                  target_component_id='2')
+    nodes = load().launch_setup(ctx)
+    assert str(nodes[-4].node_executable) == 'mission_path'
+    params = evaluate_parameters(ctx, nodes[0]._Node__parameters)[-1]
+    assert params['target_system_id'] == 7 and params['target_component_id'] == 2
+    assert 'waypoint' in params['plugin_allowlist']
+    assert 'lr_future_path' not in params['plugin_allowlist']
+    params = evaluate_parameters(ctx, nodes[-3]._Node__parameters)[-1]
+    assert params['trajectory.input_topic'] == '/lr/future_path/mission'
+    assert params['live_path_topic'] == '/lr/future_path/mission'
+    runtime = evaluate_parameters(ctx, nodes[2]._Node__parameters)[-1]
+    assert runtime['camera_time_mode'] == 'unverified'
+    segmentation = evaluate_parameters(ctx, nodes[4]._Node__parameters)[-1]
+    assert segmentation['source_guard_topic'] == '/lr/source/camera_generation'

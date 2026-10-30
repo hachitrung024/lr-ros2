@@ -82,3 +82,31 @@ def test_same_session_generation_drops_preboundary_dds_samples():
     fresh = path(now[0])
     assert guard.enter(fresh) is not None
     assert guard.enter(old_stamp) is None
+
+
+def test_native_processing_latency_keeps_causal_inputs_until_source_deadline():
+    now = [time.time_ns()]
+    node = SimpleNamespace(create_subscription=lambda *_a, **_k: None,
+                           create_timer=lambda *_a: None,
+                           declare_parameter=lambda name, default: SimpleNamespace(
+                               value=2. if name == 'live_path_max_source_age_sec' else default),
+                           get_clock=lambda: SimpleNamespace(now=lambda: SimpleNamespace(
+                               nanoseconds=now[0])))
+    resets = []
+    guard = PredictionGuard(node, lambda _: resets.append(1))
+    guard.source.on_state(String(data=json.dumps({
+        'runtime_id': 'r', 'generation': 1, 'ready': True, 'start_ns': 1})))
+    message = Path(poses=[PoseStamped(), PoseStamped()])
+    message.header.stamp.sec, message.header.stamp.nanosec = divmod(now[0], 1_000_000_000)
+    guard.on_path(message)
+    guard.poll()
+    resets.clear()
+    # The freshly evaluated route is based on an IMAGE pose. Processing and
+    # transport take >1 s, but remain inside the existing 2 s fusion deadline.
+    now[0] += 1_200_000_000
+    guard.on_path(message)  # Equal stamps do not renew its receipt watchdog.
+    guard.poll()
+    assert guard.available() and not resets
+    guard.path_seen -= 1.1
+    guard.poll()
+    assert not guard.available() and resets

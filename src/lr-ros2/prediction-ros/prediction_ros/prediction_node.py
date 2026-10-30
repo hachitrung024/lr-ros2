@@ -180,6 +180,9 @@ class PredictionNode:
             self._types["output"], topic("prediction_output_topic"), reliable
         )
         self._node = node
+        self._report_started = time.monotonic()
+        self._reported_outputs = 0
+        self._output_seen = None
         self._source_guard = attach_prediction_guard(node, self._on_time_jump)
         self._work_token = None
         self._diagnostics = node.create_publisher(
@@ -224,6 +227,7 @@ class PredictionNode:
             return
         self._publisher.publish(message)
         self._output_count += 1
+        self._output_seen = time.monotonic()
 
     def _on_time_jump(self, _jump) -> None:
         self.runtime.reset()
@@ -239,31 +243,46 @@ class PredictionNode:
     def _publish_diagnostics(self) -> None:
         if not self._node.context.ok():
             return
+        now = time.monotonic()
+        age_ns = -1
+        waiting = self._waiting
         if self._active_trajectory is not None:
             age_ns = self._node.get_clock().now().nanoseconds - stamp_ns(
                 self._active_trajectory.header.stamp
             )
-            if age_ns > 500_000_000:
-                self._waiting = "waiting: stale trajectory"
+            max_age = getattr(self._source_guard, 'max_source_age_sec', 1.)
+            if age_ns > max_age * 1e9:
+                waiting = 'waiting: stale trajectory; ' + waiting
         message = DiagnosticArray()
         message.header.stamp = self._node.get_clock().now().to_msg()
         message.status = [
             DiagnosticStatus(
                 name="prediction_node",
-                level=DiagnosticStatus.OK if self._waiting == "ready" else DiagnosticStatus.WARN,
-                message=self._waiting,
+                level=DiagnosticStatus.OK if waiting == "ready" else DiagnosticStatus.WARN,
+                message=waiting,
                 values=[
                     KeyValue(key="trajectory_id", value=str(
                         -1 if self._active_trajectory is None
                         else self._active_trajectory.trajectory_id
                     )),
                     KeyValue(key="output_count", value=str(self._output_count)),
+                    KeyValue(key="output_hz", value=str(
+                        (self._output_count-self._reported_outputs) /
+                        max(.001, now-self._report_started)
+                    )),
+                    KeyValue(key="output_age_sec", value=str(
+                        -1 if self._output_seen is None else now-self._output_seen
+                    )),
+                    KeyValue(key="trajectory_age_sec", value=str(
+                        age_ns / 1e9 if self._active_trajectory is not None else -1
+                    )),
                     KeyValue(key="callback_ms", value=str(self._callback_ms)),
                     KeyValue(key="callback_ms_ema", value=str(self._callback_ms_ema)),
                 ],
             )
         ]
         self._diagnostics.publish(message)
+        self._reported_outputs, self._report_started = self._output_count, now
 
     @guarded
     def _trajectory_callback(self, msg) -> None:
